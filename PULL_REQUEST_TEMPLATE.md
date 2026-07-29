@@ -7,12 +7,12 @@ The title carries more weight than anything below it. Imperative, complete sente
 -->
 
 Closes:
-<!-- URLs this PR resolves and marks done: Linear issue, GitHub issue, Sentry issue. Delete both lines when there is nothing to close. -->
+<!-- What this PR resolves and marks done: Linear issue, Nightwatch issue, Sentry issue, GitHub issue. One per line. A GitHub issue closes on merge only when the keyword sits on the reference itself, so write that line as `- Closes #123`. The heading alone does not close anything. Delete both lines when there is nothing to close. -->
 
 -
 
 Related:
-<!-- Context URLs this PR does not resolve: Slack thread, design doc, partially addressed Sentry issue. Delete both lines when there is nothing to link. -->
+<!-- Context this PR does not resolve: Slack thread, design doc, partially addressed Sentry or Nightwatch issue. Delete both lines when there is nothing to link. -->
 
 -
 
