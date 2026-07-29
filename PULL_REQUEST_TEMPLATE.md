@@ -1,8 +1,6 @@
 <!--
 Publica.la pull request template.
-
-How to write each section: the `creating-mrs` skill, distributed into every project at .claude/skills/creating-mrs/SKILL.md.
-Why this file exists and how it stays in sync: https://github.com/publicala/pla-stack/blob/main/references/pull-requests.md
+Reference copy: https://github.com/publicala/.github/blob/main/PULL_REQUEST_TEMPLATE.md
 
 Delete every section that does not apply. Never leave a section holding "none" or "N/A".
 The title carries more weight than anything below it. Imperative, complete sentence, understandable on its own in `git log`.
