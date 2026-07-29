@@ -10,10 +10,12 @@ The title carries more weight than anything below it. Imperative, complete sente
 
 Closes:
 <!-- URLs this PR resolves and marks done: Linear issue, GitHub issue, Sentry issue. Delete both lines when there is nothing to close. -->
+
 -
 
 Related:
 <!-- Context URLs this PR does not resolve: Slack thread, design doc, partially addressed Sentry issue. Delete both lines when there is nothing to link. -->
+
 -
 
 ## Summary
@@ -44,7 +46,7 @@ Related:
 
 ## Deployment
 
-<!-- Replace this whole block with "No special steps required" when nothing is needed. -->
+<!-- Fill the rows that apply and delete the rest. Replace the whole block with "No special steps required" when none of them apply. -->
 
 - [ ] Migrations:
 - [ ] Cache or config clear:
