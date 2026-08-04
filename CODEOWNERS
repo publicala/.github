@@ -1,7 +1,10 @@
-# Changes to the org-wide secret-scan gate need approval from one of the
-# owners below. The repository ruleset "secret-scan ownership" enforces
-# this via required code-owner review. CODEOWNERS itself is owned too,
-# so the ownership list cannot be edited around.
+# Changes to the org-wide secret-scan gate need approval from the
+# @publicala/secret-scan-owners team. The repository ruleset
+# "secret-scan ownership" enforces this with a required-reviewers rule
+# scoped to these file patterns, with no bypass actors. This file is
+# the human-readable record of that ownership: GitHub does not resolve
+# CODEOWNERS auto-requests in this repository, the ruleset is the
+# enforcement.
 
-/.github/CODEOWNERS          @fgilio @imilano-pla
-/.github/workflows/secret-scan.yml  @fgilio @imilano-pla
+/CODEOWNERS                         @publicala/secret-scan-owners
+/.github/workflows/secret-scan.yml  @publicala/secret-scan-owners
