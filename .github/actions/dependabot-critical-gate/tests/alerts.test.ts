@@ -26,6 +26,49 @@ test('parses every matching advisory range', () => {
   assert.deepEqual(alerts[0]?.vulnerabilities.map((item) => item.vulnerableRange), ['< 1.2.0', '>= 2, < 2.1']);
 });
 
+test('keeps non-Python advisory package identities exact', () => {
+  const alert = parseAlerts([{
+    number: 12,
+    created_at: '2026-01-01T00:00:00Z',
+    html_url: 'https://github.com/acme/repo/security/dependabot/12',
+    dependency: {
+      manifest_path: 'package-lock.json',
+      package: { ecosystem: 'npm', name: 'foo_bar' },
+    },
+    security_advisory: {
+      ghsa_id: 'GHSA-1111-2222-3333',
+      severity: 'critical',
+      vulnerabilities: [
+        { package: { ecosystem: 'npm', name: 'foo-bar' }, vulnerable_version_range: '< 9.0.0' },
+        { package: { ecosystem: 'npm', name: 'foo_bar' }, vulnerable_version_range: '< 2.0.0' },
+      ],
+    },
+  }])[0];
+
+  assert.deepEqual(alert?.vulnerabilities.map((item) => item.vulnerableRange), ['< 2.0.0']);
+});
+
+test('normalizes a root-prefixed manifest to a repository-relative path', () => {
+  const alert = parseAlerts([{
+    number: 12,
+    created_at: '2026-01-01T00:00:00Z',
+    html_url: 'https://github.com/acme/repo/security/dependabot/12',
+    dependency: {
+      manifest_path: '/package-lock.json',
+      package: { ecosystem: 'npm', name: 'example' },
+    },
+    security_advisory: {
+      ghsa_id: 'GHSA-1111-2222-3333',
+      severity: 'critical',
+      vulnerabilities: [
+        { package: { ecosystem: 'npm', name: 'example' }, vulnerable_version_range: '< 1.2.0' },
+      ],
+    },
+  }])[0];
+
+  assert.equal(alert?.manifest, 'package-lock.json');
+});
+
 test('treats the SLA boundary as overdue', () => {
   const alert = parseAlerts([{
     number: 1,
@@ -46,6 +89,20 @@ test('treats the SLA boundary as overdue', () => {
 
 test('rejects incomplete alert data', () => {
   assert.throws(() => parseAlerts([{ number: 1 }]), /alert\.dependency is not an object/);
+});
+
+test('rejects a manifest path that does not identify a file', () => {
+  assert.throws(() => parseAlerts([{
+    number: 1,
+    created_at: '2026-01-01T00:00:00Z',
+    html_url: 'https://example.test/1',
+    dependency: { manifest_path: '/', package: { ecosystem: 'npm', name: 'example' } },
+    security_advisory: {
+      ghsa_id: 'GHSA-1111-2222-3333',
+      severity: 'critical',
+      vulnerabilities: [{ package: { ecosystem: 'npm', name: 'example' }, vulnerable_version_range: '< 2' }],
+    },
+  }]), /does not identify a repository file/);
 });
 
 test('rejects an unknown severity', () => {

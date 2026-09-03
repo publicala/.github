@@ -33,6 +33,19 @@ test('reads npm lockfile version 2', () => {
   assert.deepEqual(packageVersions('nested/package-lock.json', content, 'example'), ['1.2.3']);
 });
 
+test('keeps non-Python package identities exact', () => {
+  const content = JSON.stringify({
+    lockfileVersion: 3,
+    packages: {
+      'node_modules/foo-bar': { version: '2.0.0' },
+      'node_modules/foo_bar': { version: '1.0.0' },
+    },
+  });
+
+  assert.deepEqual(packageVersions('package-lock.json', content, 'foo-bar'), ['2.0.0']);
+  assert.deepEqual(packageVersions('package-lock.json', content, 'foo_bar'), ['1.0.0']);
+});
+
 test('reads Yarn classic and Berry lockfiles', () => {
   const classic = 'example@^1.0.0, example@~1.2.0:\n  version "1.2.3"\n  resolved "https://example.test"\n';
   const berry = '__metadata:\n  version: 8\n\n"example@npm:^2.0.0":\n  version: 2.1.0\n  resolution: "example@npm:2.1.0"\n';
@@ -64,6 +77,13 @@ test('reads RubyGems and Python lock formats', () => {
   assert.deepEqual(packageVersions('Pipfile.lock', pipfile, 'Django'), ['5.1.2']);
   assert.deepEqual(packageVersions('poetry.lock', poetry, 'django'), ['5.1.2']);
   assert.deepEqual(packageVersions('uv.lock', poetry, 'django'), ['5.1.2']);
+});
+
+test('uses PEP 503 package-name normalization for Python', () => {
+  assert.deepEqual(
+    packageVersions('requirements.txt', 'zope_interface==7.0.0\n', 'Zope.Interface'),
+    ['7.0.0'],
+  );
 });
 
 test('rejects non-exact requirements for the alerted package', () => {

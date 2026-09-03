@@ -42983,11 +42983,13 @@ function parseAlert(value) {
   const dependencyPackage = object(dependency.package, "alert.dependency.package");
   const advisory = object(alert.security_advisory, "alert.security_advisory");
   const severity = requiredString(advisory.severity, "alert.security_advisory.severity").toLowerCase();
+  const ecosystem = requiredString(dependencyPackage.ecosystem, "alert.dependency.package.ecosystem").toLowerCase();
+  const packageName = requiredString(dependencyPackage.name, "alert.dependency.package.name");
   if (!isSeverity(severity)) {
     throw new Error(`Alert #${String(alert.number)} has an unknown severity.`);
   }
   const vulnerabilities = array(advisory.vulnerabilities, "alert.security_advisory.vulnerabilities").map(parseVulnerability).filter(
-    (item) => item.ecosystem === requiredString(dependencyPackage.ecosystem, "alert.dependency.package.ecosystem").toLowerCase() && normalizePackage(item.name) === normalizePackage(requiredString(dependencyPackage.name, "alert.dependency.package.name"))
+    (item) => item.ecosystem === ecosystem && samePackageName(ecosystem, item.name, packageName)
   );
   if (vulnerabilities.length === 0) {
     throw new Error(`Alert #${String(alert.number)} has no vulnerability range for its dependency.`);
@@ -42997,12 +42999,19 @@ function parseAlert(value) {
     ghsa: requiredString(advisory.ghsa_id, "alert.security_advisory.ghsa_id"),
     severity,
     createdAt: requiredString(alert.created_at, "alert.created_at"),
-    manifest: requiredString(dependency.manifest_path, "alert.dependency.manifest_path"),
-    ecosystem: requiredString(dependencyPackage.ecosystem, "alert.dependency.package.ecosystem").toLowerCase(),
-    package: requiredString(dependencyPackage.name, "alert.dependency.package.name"),
+    manifest: repositoryPath(dependency.manifest_path, "alert.dependency.manifest_path"),
+    ecosystem,
+    package: packageName,
     vulnerabilities,
     htmlUrl: requiredString(alert.html_url, "alert.html_url")
   };
+}
+function repositoryPath(value, field) {
+  const path = requiredString(value, field).replace(/^\/+/, "");
+  if (path === "") {
+    throw new Error(`${field} does not identify a repository file.`);
+  }
+  return path;
 }
 function parseVulnerability(value) {
   const vulnerability = object(value, "vulnerability");
@@ -43040,8 +43049,14 @@ function requiredPositiveInteger(value, field) {
 function isSeverity(value) {
   return ["critical", "high", "medium", "low"].includes(value);
 }
-function normalizePackage(value) {
-  return value.toLowerCase().replaceAll("_", "-");
+function samePackageName(ecosystem, value, target) {
+  if (ecosystem !== "pip") {
+    return value === target;
+  }
+  return normalizePythonName(value) === normalizePythonName(target);
+}
+function normalizePythonName(value) {
+  return value.toLowerCase().replace(/[-_.]+/g, "-");
 }
 
 // .github/actions/dependabot-critical-gate/src/acceptances.ts
@@ -44017,7 +44032,7 @@ function requirements(content, target) {
   return unique(content.split(/\r?\n/).flatMap((line) => {
     const withoutComment = line.replace(/\s+#.*$/, "").trim();
     const declaration = withoutComment.match(/^([A-Za-z0-9_.-]+)(?:\[[^\]]+\])?(?=\s|[<>=!~@]|$)(.*)$/);
-    if (declaration?.[1] === void 0 || !sameName(declaration[1], target)) {
+    if (declaration?.[1] === void 0 || !samePythonName(declaration[1], target)) {
       return [];
     }
     const pin = declaration[2]?.trim().match(/^===?\s*([^,\s;]+)(?:\s*;.*)?$/);
@@ -44036,7 +44051,7 @@ function pipfileLock(content, target) {
       continue;
     }
     for (const [name, raw] of Object.entries(packages)) {
-      if (!sameName(name, target)) {
+      if (!samePythonName(name, target)) {
         continue;
       }
       const item = asObject(raw);
@@ -44055,7 +44070,7 @@ function pythonTomlLock(content, target) {
   const packages = document2 === null ? [] : arrayOrEmpty(document2.package);
   return unique(packages.flatMap((raw) => {
     const item = asObject(raw);
-    if (item === null || !sameName(item.name, target)) {
+    if (item === null || !samePythonName(item.name, target)) {
       return [];
     }
     return [requiredVersion(item.version, target, "Python lockfile")];
@@ -44102,10 +44117,13 @@ function arrayOrEmpty(value) {
   return Array.isArray(value) ? value : [];
 }
 function sameName(value, target) {
-  return typeof value === "string" && normalizeName(value) === normalizeName(target);
+  return value === target;
 }
-function normalizeName(value) {
-  return value.toLowerCase().replaceAll("_", "-");
+function samePythonName(value, target) {
+  return typeof value === "string" && normalizePythonName2(value) === normalizePythonName2(target);
+}
+function normalizePythonName2(value) {
+  return value.toLowerCase().replace(/[-_.]+/g, "-");
 }
 function requiredVersion(value, target, manifest) {
   if (typeof value !== "string" || value.trim() === "") {

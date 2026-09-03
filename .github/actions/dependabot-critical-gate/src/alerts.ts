@@ -26,6 +26,8 @@ function parseAlert(value: unknown): Alert {
   const dependencyPackage = object(dependency.package, 'alert.dependency.package');
   const advisory = object(alert.security_advisory, 'alert.security_advisory');
   const severity = requiredString(advisory.severity, 'alert.security_advisory.severity').toLowerCase();
+  const ecosystem = requiredString(dependencyPackage.ecosystem, 'alert.dependency.package.ecosystem').toLowerCase();
+  const packageName = requiredString(dependencyPackage.name, 'alert.dependency.package.name');
 
   if (!isSeverity(severity)) {
     throw new Error(`Alert #${String(alert.number)} has an unknown severity.`);
@@ -34,8 +36,8 @@ function parseAlert(value: unknown): Alert {
   const vulnerabilities = array(advisory.vulnerabilities, 'alert.security_advisory.vulnerabilities')
     .map(parseVulnerability)
     .filter((item) =>
-      item.ecosystem === requiredString(dependencyPackage.ecosystem, 'alert.dependency.package.ecosystem').toLowerCase()
-      && normalizePackage(item.name) === normalizePackage(requiredString(dependencyPackage.name, 'alert.dependency.package.name')),
+      item.ecosystem === ecosystem
+      && samePackageName(ecosystem, item.name, packageName),
     );
 
   if (vulnerabilities.length === 0) {
@@ -47,12 +49,22 @@ function parseAlert(value: unknown): Alert {
     ghsa: requiredString(advisory.ghsa_id, 'alert.security_advisory.ghsa_id'),
     severity,
     createdAt: requiredString(alert.created_at, 'alert.created_at'),
-    manifest: requiredString(dependency.manifest_path, 'alert.dependency.manifest_path'),
-    ecosystem: requiredString(dependencyPackage.ecosystem, 'alert.dependency.package.ecosystem').toLowerCase(),
-    package: requiredString(dependencyPackage.name, 'alert.dependency.package.name'),
+    manifest: repositoryPath(dependency.manifest_path, 'alert.dependency.manifest_path'),
+    ecosystem,
+    package: packageName,
     vulnerabilities,
     htmlUrl: requiredString(alert.html_url, 'alert.html_url'),
   };
+}
+
+function repositoryPath(value: unknown, field: string): string {
+  const path = requiredString(value, field).replace(/^\/+/, '');
+
+  if (path === '') {
+    throw new Error(`${field} does not identify a repository file.`);
+  }
+
+  return path;
 }
 
 function parseVulnerability(value: unknown): Vulnerability {
@@ -102,7 +114,14 @@ function isSeverity(value: string): value is Severity {
   return ['critical', 'high', 'medium', 'low'].includes(value);
 }
 
-function normalizePackage(value: string): string {
-  return value.toLowerCase().replaceAll('_', '-');
+function samePackageName(ecosystem: string, value: string, target: string): boolean {
+  if (ecosystem !== 'pip') {
+    return value === target;
+  }
+
+  return normalizePythonName(value) === normalizePythonName(target);
 }
 
+function normalizePythonName(value: string): string {
+  return value.toLowerCase().replace(/[-_.]+/g, '-');
+}

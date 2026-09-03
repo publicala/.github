@@ -194,7 +194,7 @@ function requirements(content: string, target: string): string[] {
   return unique(content.split(/\r?\n/).flatMap((line) => {
     const withoutComment = line.replace(/\s+#.*$/, '').trim();
     const declaration = withoutComment.match(/^([A-Za-z0-9_.-]+)(?:\[[^\]]+\])?(?=\s|[<>=!~@]|$)(.*)$/);
-    if (declaration?.[1] === undefined || !sameName(declaration[1], target)) {
+    if (declaration?.[1] === undefined || !samePythonName(declaration[1], target)) {
       return [];
     }
 
@@ -216,7 +216,7 @@ function pipfileLock(content: string, target: string): string[] {
       continue;
     }
     for (const [name, raw] of Object.entries(packages)) {
-      if (!sameName(name, target)) {
+      if (!samePythonName(name, target)) {
         continue;
       }
       const item = asObject(raw);
@@ -236,7 +236,7 @@ function pythonTomlLock(content: string, target: string): string[] {
   const packages = document === null ? [] : arrayOrEmpty(document.package);
   return unique(packages.flatMap((raw) => {
     const item = asObject(raw);
-    if (item === null || !sameName(item.name, target)) {
+    if (item === null || !samePythonName(item.name, target)) {
       return [];
     }
     return [requiredVersion(item.version, target, 'Python lockfile')];
@@ -289,11 +289,15 @@ function arrayOrEmpty(value: unknown): unknown[] {
 }
 
 function sameName(value: unknown, target: string): boolean {
-  return typeof value === 'string' && normalizeName(value) === normalizeName(target);
+  return value === target;
 }
 
-function normalizeName(value: string): string {
-  return value.toLowerCase().replaceAll('_', '-');
+function samePythonName(value: unknown, target: string): boolean {
+  return typeof value === 'string' && normalizePythonName(value) === normalizePythonName(target);
+}
+
+function normalizePythonName(value: string): string {
+  return value.toLowerCase().replace(/[-_.]+/g, '-');
 }
 
 function requiredVersion(value: unknown, target: string, manifest: string): string {
