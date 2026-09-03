@@ -23,6 +23,7 @@ test('blocks an ordinary change while all overdue Critical alerts remain', async
 
 test('allows a change that reduces the blocking alert count', async () => {
   const files = new Map([
+    ['base:package-lock.json', npmLock({ first: '1.0.0', second: '1.0.0' })],
     ['merge:package-lock.json', npmLock({ first: '2.0.0', second: '1.0.0' })],
   ]);
   const result = await evaluateGate(input([alert(1, 'first'), alert(2, 'second')], files));
@@ -66,6 +67,33 @@ test('fails closed when only the vulnerable installed copy is deleted', async ()
 
   assert.equal(passes(result), false);
   assert.match(result.unverified[1] ?? '', /partial dependency removal is not proven/);
+  assert.deepEqual(result.fixed, []);
+});
+
+test('fails closed when a vulnerable occurrence is replaced at another location', async () => {
+  const base = JSON.stringify({
+    lockfileVersion: 3,
+    packages: {
+      'node_modules/first': { version: '1.0.0' },
+      'node_modules/parent/node_modules/first': { version: '2.0.0' },
+    },
+  });
+  const merge = JSON.stringify({
+    lockfileVersion: 3,
+    packages: {
+      'node_modules/parent/node_modules/first': { version: '2.0.0' },
+      'node_modules/unrelated/node_modules/first': { version: '2.0.0' },
+    },
+  });
+  const files = new Map([
+    ['base:package-lock.json', base],
+    ['merge:package-lock.json', merge],
+  ]);
+
+  const result = await evaluateGate(input([alert(1, 'first')], files));
+
+  assert.equal(passes(result), false);
+  assert.match(result.unverified[1] ?? '', /occurrence node_modules\/first is missing/);
   assert.deepEqual(result.fixed, []);
 });
 
