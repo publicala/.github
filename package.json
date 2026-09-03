@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "esbuild .github/actions/dependabot-critical-gate/src/main.ts --bundle --platform=node --target=node24 --format=cjs --outfile=.github/actions/dependabot-critical-gate/dist/index.js --legal-comments=external",
+    "build": "esbuild .github/actions/dependabot-critical-gate/src/main.ts --bundle --platform=node --target=node24 --format=cjs --outfile=.github/actions/dependabot-critical-gate/dist/index.cjs --legal-comments=external",
     "check-bundle": "npm run build && git diff --exit-code -- .github/actions/dependabot-critical-gate/dist",
     "test": "node --import tsx --test .github/actions/dependabot-critical-gate/tests/**/*.test.ts",
     "typecheck": "tsc --noEmit"
