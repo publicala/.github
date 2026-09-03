@@ -43895,13 +43895,13 @@ function composerLock(content, target) {
     throw new Error("composer.lock packages-dev is not an array.");
   }
   const packages = [...document2.packages, ...arrayOrEmpty(document2["packages-dev"])];
-  return unique(packages.flatMap((value) => {
+  return packages.flatMap((value) => {
     const item = asObject(value);
     if (item === null || !sameName(item.name, target)) {
       return [];
     }
     return [requiredVersion(item.version, target, "composer.lock")];
-  }));
+  });
 }
 function npmLock(content, target) {
   const document2 = jsonObject(content, "package-lock.json");
@@ -43919,8 +43919,10 @@ function npmLock(content, target) {
       }
     }
   }
-  collectNpmDependencies(document2.dependencies, target, versions);
-  return unique(versions);
+  if (packages === null) {
+    collectNpmDependencies(document2.dependencies, target, versions);
+  }
+  return versions;
 }
 function collectNpmDependencies(value, target, versions) {
   const dependencies = asObject(value);
@@ -43968,23 +43970,10 @@ function yarnLock(content, target) {
 function pnpmLock(content, target) {
   const document2 = yamlObject(content, "pnpm-lock.yaml");
   const versions = [];
-  for (const section of ["packages", "snapshots"]) {
-    const packages = asObject(document2[section]);
-    if (packages === null) {
-      continue;
-    }
-    for (const [locator, raw] of Object.entries(packages)) {
-      const item = asObject(raw);
-      const parsed = pnpmLocator(locator);
-      const name = typeof item?.name === "string" ? item.name : parsed?.name;
-      const version = typeof item?.version === "string" ? item.version : parsed?.version;
-      if (name !== void 0 && sameName(name, target)) {
-        versions.push(cleanPnpmVersion(requiredVersion(version, target, "pnpm-lock.yaml")));
-      }
-    }
-  }
+  const snapshotVersions = pnpmSection(document2.snapshots, target);
+  versions.push(...snapshotVersions.length > 0 ? snapshotVersions : pnpmSection(document2.packages, target));
   const importers = asObject(document2.importers);
-  if (importers !== null) {
+  if (versions.length === 0 && importers !== null) {
     for (const importer of Object.values(importers)) {
       const importerValue = asObject(importer);
       if (importerValue === null) {
@@ -44006,7 +43995,23 @@ function pnpmLock(content, target) {
       }
     }
   }
-  return unique(versions.filter((version) => version !== ""));
+  return versions.filter((version) => version !== "");
+}
+function pnpmSection(value, target) {
+  const packages = asObject(value);
+  if (packages === null) {
+    return [];
+  }
+  return Object.entries(packages).flatMap(([locator, raw]) => {
+    const item = asObject(raw);
+    const parsed = pnpmLocator(locator);
+    const name = typeof item?.name === "string" ? item.name : parsed?.name;
+    const version = typeof item?.version === "string" ? item.version : parsed?.version;
+    if (name === void 0 || !sameName(name, target)) {
+      return [];
+    }
+    return [cleanPnpmVersion(requiredVersion(version, target, "pnpm-lock.yaml"))];
+  });
 }
 function pnpmLocator(locator) {
   const clean2 = locator.replace(/^\//, "").replace(/\([^)]*\)+$/, "");
@@ -44026,10 +44031,10 @@ function gemfileLock(content, target) {
       versions.push(match[2]);
     }
   }
-  return unique(versions);
+  return versions;
 }
 function requirements(content, target) {
-  return unique(content.split(/\r?\n/).flatMap((line) => {
+  return content.split(/\r?\n/).flatMap((line) => {
     const withoutComment = line.replace(/\s+#.*$/, "").trim();
     const declaration = withoutComment.match(/^([A-Za-z0-9_.-]+)(?:\[[^\]]+\])?(?=\s|[<>=!~@]|$)(.*)$/);
     if (declaration?.[1] === void 0 || !samePythonName(declaration[1], target)) {
@@ -44040,7 +44045,7 @@ function requirements(content, target) {
       throw new Error(`${target} is not pinned to one exact version in requirements.txt.`);
     }
     return [pin[1]];
-  }));
+  });
 }
 function pipfileLock(content, target) {
   const document2 = jsonObject(content, "Pipfile.lock");
@@ -44063,18 +44068,18 @@ function pipfileLock(content, target) {
       versions.push(match[1]);
     }
   }
-  return unique(versions);
+  return versions;
 }
 function pythonTomlLock(content, target) {
   const document2 = asObject(parse3(content));
   const packages = document2 === null ? [] : arrayOrEmpty(document2.package);
-  return unique(packages.flatMap((raw) => {
+  return packages.flatMap((raw) => {
     const item = asObject(raw);
     if (item === null || !samePythonName(item.name, target)) {
       return [];
     }
     return [requiredVersion(item.version, target, "Python lockfile")];
-  }));
+  });
 }
 function selectorsContain(selectors, target) {
   return selectors.split(/,\s*/).some((selector) => {
@@ -45129,15 +45134,26 @@ function passes(result) {
   return result.candidateBlocked.length === 0 || result.candidateBlocked.length < result.baseBlocked.length;
 }
 async function isFixed(input, alert) {
-  const content = await input.readFile(input.candidate.candidateSha, alert.manifest);
-  if (content === null) {
+  const candidateContent = await input.readFile(input.candidate.candidateSha, alert.manifest);
+  if (candidateContent === null) {
     throw new Error(`${alert.manifest} is missing from the candidate tree; dependency removal is not proven.`);
   }
-  const versions = packageVersions(alert.manifest, content, alert.package);
-  if (versions.length === 0) {
+  const candidateVersions = packageVersions(alert.manifest, candidateContent, alert.package);
+  if (candidateVersions.length === 0) {
     throw new Error(`${alert.package} is not present in ${alert.manifest}; dependency removal is not proven.`);
   }
-  return versions.every(
+  const baseContent = await input.readFile(input.candidate.baseSha, alert.manifest);
+  if (baseContent === null) {
+    throw new Error(`${alert.manifest} is missing from the base tree; the current exposure cannot be verified.`);
+  }
+  const baseVersions = packageVersions(alert.manifest, baseContent, alert.package);
+  if (baseVersions.length === 0) {
+    throw new Error(`${alert.package} is not present in the base ${alert.manifest}; the current exposure cannot be verified.`);
+  }
+  if (candidateVersions.length < baseVersions.length) {
+    throw new Error(`${alert.package} has fewer installed copies in ${alert.manifest}; partial dependency removal is not proven.`);
+  }
+  return candidateVersions.every(
     (version) => alert.vulnerabilities.every(
       (vulnerability) => !isVulnerable(alert.ecosystem, version, vulnerability.vulnerableRange)
     )

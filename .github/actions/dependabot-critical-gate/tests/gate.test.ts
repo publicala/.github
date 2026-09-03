@@ -43,6 +43,32 @@ test('requires every installed copy to be safe', async () => {
   assert.equal(passes(result), false);
 });
 
+test('fails closed when only the vulnerable installed copy is deleted', async () => {
+  const base = JSON.stringify({
+    lockfileVersion: 3,
+    packages: {
+      'node_modules/first': { version: '2.0.0' },
+      'node_modules/parent/node_modules/first': { version: '1.0.0' },
+    },
+  });
+  const merge = JSON.stringify({
+    lockfileVersion: 3,
+    packages: {
+      'node_modules/first': { version: '2.0.0' },
+    },
+  });
+  const files = new Map([
+    ['base:package-lock.json', base],
+    ['merge:package-lock.json', merge],
+  ]);
+
+  const result = await evaluateGate(input([alert(1, 'first')], files));
+
+  assert.equal(passes(result), false);
+  assert.match(result.unverified[1] ?? '', /partial dependency removal is not proven/);
+  assert.deepEqual(result.fixed, []);
+});
+
 test('uses all advisory vulnerability ranges', async () => {
   const vulnerable = alert(1, 'first');
   vulnerable.vulnerabilities.push({ ecosystem: 'npm', name: 'first', vulnerableRange: '>= 3, < 4' });
@@ -154,13 +180,23 @@ test('reports stale and expired acceptances without making them bypass the gate'
 });
 
 function input(alerts: Alert[], files: Map<string, string>) {
+  const repositoryFiles = new Map(files);
+  for (const [key, content] of files) {
+    if (key.startsWith('merge:') && key !== 'merge:.github/security/dependabot-accepted.yml') {
+      const baseKey = `base:${key.slice('merge:'.length)}`;
+      if (!repositoryFiles.has(baseKey)) {
+        repositoryFiles.set(baseKey, content);
+      }
+    }
+  }
+
   return {
     alerts,
     candidate,
     now,
     slaHours: 168,
     acceptancePath: '.github/security/dependabot-accepted.yml',
-    readFile: async (sha: string, path: string) => files.get(`${sha}:${path}`) ?? null,
+    readFile: async (sha: string, path: string) => repositoryFiles.get(`${sha}:${path}`) ?? null,
   };
 }
 

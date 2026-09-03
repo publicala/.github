@@ -75,17 +75,30 @@ export function passes(result: GateResult): boolean {
 }
 
 async function isFixed(input: GateInput, alert: Alert): Promise<boolean> {
-  const content = await input.readFile(input.candidate.candidateSha, alert.manifest);
-  if (content === null) {
+  const candidateContent = await input.readFile(input.candidate.candidateSha, alert.manifest);
+  if (candidateContent === null) {
     throw new Error(`${alert.manifest} is missing from the candidate tree; dependency removal is not proven.`);
   }
 
-  const versions = packageVersions(alert.manifest, content, alert.package);
-  if (versions.length === 0) {
+  const candidateVersions = packageVersions(alert.manifest, candidateContent, alert.package);
+  if (candidateVersions.length === 0) {
     throw new Error(`${alert.package} is not present in ${alert.manifest}; dependency removal is not proven.`);
   }
 
-  return versions.every((version) =>
+  const baseContent = await input.readFile(input.candidate.baseSha, alert.manifest);
+  if (baseContent === null) {
+    throw new Error(`${alert.manifest} is missing from the base tree; the current exposure cannot be verified.`);
+  }
+
+  const baseVersions = packageVersions(alert.manifest, baseContent, alert.package);
+  if (baseVersions.length === 0) {
+    throw new Error(`${alert.package} is not present in the base ${alert.manifest}; the current exposure cannot be verified.`);
+  }
+  if (candidateVersions.length < baseVersions.length) {
+    throw new Error(`${alert.package} has fewer installed copies in ${alert.manifest}; partial dependency removal is not proven.`);
+  }
+
+  return candidateVersions.every((version) =>
     alert.vulnerabilities.every((vulnerability) =>
       !isVulnerable(alert.ecosystem, version, vulnerability.vulnerableRange),
     ),

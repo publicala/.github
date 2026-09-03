@@ -39,13 +39,13 @@ function composerLock(content: string, target: string): string[] {
   }
   const packages = [...document.packages, ...arrayOrEmpty(document['packages-dev'])];
 
-  return unique(packages.flatMap((value) => {
+  return packages.flatMap((value) => {
     const item = asObject(value);
     if (item === null || !sameName(item.name, target)) {
       return [];
     }
     return [requiredVersion(item.version, target, 'composer.lock')];
-  }));
+  });
 }
 
 function npmLock(content: string, target: string): string[] {
@@ -66,8 +66,11 @@ function npmLock(content: string, target: string): string[] {
     }
   }
 
-  collectNpmDependencies(document.dependencies, target, versions);
-  return unique(versions);
+  if (packages === null) {
+    collectNpmDependencies(document.dependencies, target, versions);
+  }
+
+  return versions;
 }
 
 function collectNpmDependencies(value: unknown, target: string, versions: string[]): void {
@@ -123,25 +126,11 @@ function pnpmLock(content: string, target: string): string[] {
   const document = yamlObject(content, 'pnpm-lock.yaml');
   const versions: string[] = [];
 
-  for (const section of ['packages', 'snapshots']) {
-    const packages = asObject(document[section]);
-    if (packages === null) {
-      continue;
-    }
-
-    for (const [locator, raw] of Object.entries(packages)) {
-      const item = asObject(raw);
-      const parsed = pnpmLocator(locator);
-      const name = typeof item?.name === 'string' ? item.name : parsed?.name;
-      const version = typeof item?.version === 'string' ? item.version : parsed?.version;
-      if (name !== undefined && sameName(name, target)) {
-        versions.push(cleanPnpmVersion(requiredVersion(version, target, 'pnpm-lock.yaml')));
-      }
-    }
-  }
+  const snapshotVersions = pnpmSection(document.snapshots, target);
+  versions.push(...(snapshotVersions.length > 0 ? snapshotVersions : pnpmSection(document.packages, target)));
 
   const importers = asObject(document.importers);
-  if (importers !== null) {
+  if (versions.length === 0 && importers !== null) {
     for (const importer of Object.values(importers)) {
       const importerValue = asObject(importer);
       if (importerValue === null) {
@@ -164,7 +153,26 @@ function pnpmLock(content: string, target: string): string[] {
     }
   }
 
-  return unique(versions.filter((version) => version !== ''));
+  return versions.filter((version) => version !== '');
+}
+
+function pnpmSection(value: unknown, target: string): string[] {
+  const packages = asObject(value);
+  if (packages === null) {
+    return [];
+  }
+
+  return Object.entries(packages).flatMap(([locator, raw]) => {
+    const item = asObject(raw);
+    const parsed = pnpmLocator(locator);
+    const name = typeof item?.name === 'string' ? item.name : parsed?.name;
+    const version = typeof item?.version === 'string' ? item.version : parsed?.version;
+    if (name === undefined || !sameName(name, target)) {
+      return [];
+    }
+
+    return [cleanPnpmVersion(requiredVersion(version, target, 'pnpm-lock.yaml'))];
+  });
 }
 
 function pnpmLocator(locator: string): { name: string; version: string } | null {
@@ -187,11 +195,11 @@ function gemfileLock(content: string, target: string): string[] {
       versions.push(match[2]);
     }
   }
-  return unique(versions);
+  return versions;
 }
 
 function requirements(content: string, target: string): string[] {
-  return unique(content.split(/\r?\n/).flatMap((line) => {
+  return content.split(/\r?\n/).flatMap((line) => {
     const withoutComment = line.replace(/\s+#.*$/, '').trim();
     const declaration = withoutComment.match(/^([A-Za-z0-9_.-]+)(?:\[[^\]]+\])?(?=\s|[<>=!~@]|$)(.*)$/);
     if (declaration?.[1] === undefined || !samePythonName(declaration[1], target)) {
@@ -204,7 +212,7 @@ function requirements(content: string, target: string): string[] {
     }
 
     return [pin[1]];
-  }));
+  });
 }
 
 function pipfileLock(content: string, target: string): string[] {
@@ -228,19 +236,19 @@ function pipfileLock(content: string, target: string): string[] {
       versions.push(match[1]);
     }
   }
-  return unique(versions);
+  return versions;
 }
 
 function pythonTomlLock(content: string, target: string): string[] {
   const document = asObject(parseToml(content));
   const packages = document === null ? [] : arrayOrEmpty(document.package);
-  return unique(packages.flatMap((raw) => {
+  return packages.flatMap((raw) => {
     const item = asObject(raw);
     if (item === null || !samePythonName(item.name, target)) {
       return [];
     }
     return [requiredVersion(item.version, target, 'Python lockfile')];
-  }));
+  });
 }
 
 function selectorsContain(selectors: string, target: string): boolean {
