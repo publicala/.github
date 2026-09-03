@@ -1,0 +1,34 @@
+name: Dependabot Critical Gate
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, ready_for_review]
+  merge_group:
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  gate:
+    name: Critical alert SLA gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Mint Dependabot alerts token
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ secrets.DEPENDABOT_GATE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.DEPENDABOT_GATE_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+          permission-vulnerability-alerts: read
+
+      - name: Evaluate Critical alerts
+        uses: $/.github/actions/dependabot-critical-gate
+        with:
+          alerts-token: ${{ steps.app-token.outputs.token }}
+          repository-token: ${{ github.token }}
+          sla-hours: '168'
+          acceptance-file: .github/security/dependabot-accepted.yml
