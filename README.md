@@ -16,11 +16,11 @@ Decision flow:
 
 - Open Dependabot alerts
   - Critical and younger than 168 hours: report, then pass.
-  - High or Medium: report only.
+  - High, Medium, or Low: report only.
   - Critical and at least 168 hours old
     - Active risk acceptance: pass that alert.
     - All installed copies are outside every vulnerable range: pass that alert.
-    - Missing files, absent packages, and non-exact requirements fail closed.
+    - Missing files, absent packages, removed dependency locations, and non-exact requirements fail closed.
     - Candidate adds a reviewed, PR-specific remediation acceptance: pass that alert for this PR only.
     - Otherwise: keep that alert blocked.
 - Candidate result
@@ -48,7 +48,7 @@ acceptances:
     expires: 2026-10-03T12:00:00Z
 ```
 
-Risk acceptances can last at most 90 days. Use `type: remediation` only when the gate cannot parse the ecosystem. A remediation acceptance also needs `pull_request: 123` and can last at most 48 hours. It works only when the candidate adds it and the named pull request is in the candidate or merge group.
+Risk acceptances can last at most 90 days. Use `type: remediation` when the gate cannot prove the repair, including an unsupported ecosystem or a dependency removal or deduplication. A remediation acceptance also needs `pull_request: 123` and can last at most 48 hours. It works only when the candidate adds it and the named pull request is in the candidate or merge group.
 
 ### Recovery
 
