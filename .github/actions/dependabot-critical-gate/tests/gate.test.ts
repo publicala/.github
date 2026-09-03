@@ -53,6 +53,38 @@ test('uses all advisory vulnerability ranges', async () => {
   assert.equal(passes(result), false);
 });
 
+test('fails closed when the alerted manifest is deleted', async () => {
+  const result = await evaluateGate(input([alert(1, 'first')], new Map()));
+  assert.equal(passes(result), false);
+  assert.match(result.unverified[1] ?? '', /missing from the candidate tree/);
+  assert.deepEqual(result.fixed, []);
+});
+
+test('fails closed when a candidate file does not contain the alerted package', async () => {
+  const files = new Map([
+    ['merge:package-lock.json', npmLock({ second: '2.0.0' })],
+  ]);
+  const result = await evaluateGate(input([alert(1, 'first')], files));
+  assert.equal(passes(result), false);
+  assert.match(result.unverified[1] ?? '', /dependency removal is not proven/);
+  assert.deepEqual(result.fixed, []);
+});
+
+test('fails closed for a non-exact requirements declaration', async () => {
+  const pythonAlert = {
+    ...alert(1, 'Django'),
+    ecosystem: 'pip',
+    manifest: 'requirements.txt',
+    vulnerabilities: [{ ecosystem: 'pip', name: 'Django', vulnerableRange: '< 4.2.20' }],
+  };
+  const files = new Map([
+    ['merge:requirements.txt', 'Django>=4.2,<4.2.20\n'],
+  ]);
+  const result = await evaluateGate(input([pythonAlert], files));
+  assert.equal(passes(result), false);
+  assert.match(result.unverified[1] ?? '', /not pinned to one exact version/);
+});
+
 test('accepts a reviewed risk and a new remediation for the current PR', async () => {
   const risk = acceptance('risk', 1, 'first');
   const remediation = acceptance('remediation', 2, 'second', '    pull_request: 22\n');

@@ -77,12 +77,12 @@ export function passes(result: GateResult): boolean {
 async function isFixed(input: GateInput, alert: Alert): Promise<boolean> {
   const content = await input.readFile(input.candidate.candidateSha, alert.manifest);
   if (content === null) {
-    return true;
+    throw new Error(`${alert.manifest} is missing from the candidate tree; dependency removal is not proven.`);
   }
 
   const versions = packageVersions(alert.manifest, content, alert.package);
   if (versions.length === 0) {
-    return true;
+    throw new Error(`${alert.package} is not present in ${alert.manifest}; dependency removal is not proven.`);
   }
 
   return versions.every((version) =>

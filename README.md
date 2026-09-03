@@ -19,7 +19,8 @@ Decision flow:
   - High or Medium: report only.
   - Critical and at least 168 hours old
     - Active risk acceptance: pass that alert.
-    - Candidate removes the dependency or all vulnerable versions: pass that alert.
+    - All installed copies are outside every vulnerable range: pass that alert.
+    - Missing files, absent packages, and non-exact requirements fail closed.
     - Candidate adds a reviewed, PR-specific remediation acceptance: pass that alert for this PR only.
     - Otherwise: keep that alert blocked.
 - Candidate result
@@ -27,7 +28,7 @@ Decision flow:
   - Fewer blocked alerts than the base: pass, so fixes can land one at a time.
   - Same or more blocked alerts: fail.
 
-The gate reads the exact synthetic merge commit from the GitHub Git Data API. It supports Composer, npm, Yarn, pnpm, RubyGems, pip requirements, Pipenv, Poetry, and uv lockfiles. It checks every vulnerable range in the advisory and every installed copy of the package. Unknown formats fail closed for that alert.
+The gate reads the exact synthetic merge commit from the GitHub Git Data API. It supports Composer, npm, Yarn, pnpm, RubyGems, exact pip requirements, Pipenv, Poetry, and uv lockfiles. It checks every vulnerable range in the advisory and every installed copy of the package. Unknown formats and dependency removals fail closed for that alert. A removal uses the reviewed 48-hour remediation entry because a lockfile alone cannot prove that a later install will not restore the package.
 
 ### Reviewed acceptances
 

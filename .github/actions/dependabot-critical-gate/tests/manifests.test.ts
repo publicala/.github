@@ -66,6 +66,65 @@ test('reads RubyGems and Python lock formats', () => {
   assert.deepEqual(packageVersions('uv.lock', poetry, 'django'), ['5.1.2']);
 });
 
+test('rejects non-exact requirements for the alerted package', () => {
+  assert.throws(
+    () => packageVersions('requirements.txt', 'Django>=4.2,<4.2.20\n', 'django'),
+    /not pinned to one exact version/,
+  );
+  assert.throws(
+    () => packageVersions('requirements.txt', 'Django==5.1.2\nDjango>=4.2\n', 'django'),
+    /not pinned to one exact version/,
+  );
+  assert.deepEqual(
+    packageVersions('requirements.txt', 'Flask>=3\nDjango==5.1.2\n', 'django'),
+    ['5.1.2'],
+  );
+});
+
+test('rejects target entries without a usable version', () => {
+  assert.throws(
+    () => packageVersions('composer.lock', JSON.stringify({
+      packages: [{ name: 'vendor/package' }],
+      'packages-dev': [{ name: 'vendor/package', version: '2.0.0' }],
+    }), 'vendor/package'),
+    /no usable version/,
+  );
+  assert.throws(
+    () => packageVersions('package-lock.json', JSON.stringify({
+      packages: {
+        'node_modules/example': {},
+        'node_modules/parent/node_modules/example': { version: '2.0.0' },
+      },
+    }), 'example'),
+    /no usable version/,
+  );
+  assert.throws(
+    () => packageVersions('yarn.lock', 'example@^1:\n  resolved "https://example.test"\n', 'example'),
+    /no usable version/,
+  );
+  assert.throws(
+    () => packageVersions('Pipfile.lock', JSON.stringify({
+      default: { django: { version: '>=4.2' } },
+    }), 'django'),
+    /not pinned to one exact version/,
+  );
+  assert.throws(
+    () => packageVersions('poetry.lock', '[[package]]\nname = "django"\n', 'django'),
+    /no usable version/,
+  );
+});
+
+test('resolves an npm workspace link through its package entry', () => {
+  const content = JSON.stringify({
+    lockfileVersion: 3,
+    packages: {
+      'node_modules/example': { resolved: 'packages/example', link: true },
+      'packages/example': { name: 'example', version: '1.2.3' },
+    },
+  });
+  assert.deepEqual(packageVersions('package-lock.json', content, 'example'), ['1.2.3']);
+});
+
 test('fails closed on unsupported manifests and invalid documents', () => {
   assert.throws(() => packageVersions('go.sum', '', 'example'), /Unsupported manifest/);
   assert.throws(() => packageVersions('package-lock.json', '{', 'example'), /invalid JSON/);
