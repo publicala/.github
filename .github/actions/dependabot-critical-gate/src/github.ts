@@ -12,9 +12,10 @@ export async function resolveCandidate(
   repo: string,
   eventName: string,
   payload: JsonObject,
+  pause: (milliseconds: number) => Promise<void> = delay,
 ): Promise<Candidate> {
   if (eventName === 'pull_request_target') {
-    return pullRequestCandidate(octokit, owner, repo, payload);
+    return pullRequestCandidate(octokit, owner, repo, payload, pause);
   }
 
   if (eventName === 'merge_group') {
@@ -117,6 +118,7 @@ async function pullRequestCandidate(
   owner: string,
   repo: string,
   payload: JsonObject,
+  pause: (milliseconds: number) => Promise<void>,
 ): Promise<Candidate> {
   const eventPull = object(payload.pull_request, 'pull_request');
   const number = positiveInteger(payload.number, 'pull request number');
@@ -146,7 +148,7 @@ async function pullRequestCandidate(
     }
 
     if (attempt < 6) {
-      await delay(2_000);
+      await pause(2_000);
     }
   }
 
@@ -218,4 +220,3 @@ function positiveInteger(value: unknown, field: string): number {
 function delay(milliseconds: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
-

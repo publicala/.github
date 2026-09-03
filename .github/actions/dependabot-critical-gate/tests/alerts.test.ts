@@ -48,3 +48,16 @@ test('rejects incomplete alert data', () => {
   assert.throws(() => parseAlerts([{ number: 1 }]), /alert\.dependency is not an object/);
 });
 
+test('rejects an unknown severity', () => {
+  assert.throws(() => parseAlerts([{
+    number: 1,
+    created_at: '2026-01-01T00:00:00Z',
+    html_url: 'https://example.test/1',
+    dependency: { manifest_path: 'package-lock.json', package: { ecosystem: 'npm', name: 'example' } },
+    security_advisory: {
+      ghsa_id: 'GHSA-1111-2222-3333',
+      severity: 'urgent',
+      vulnerabilities: [{ package: { ecosystem: 'npm', name: 'example' }, vulnerable_version_range: '< 2' }],
+    },
+  }]), /unknown severity/);
+});

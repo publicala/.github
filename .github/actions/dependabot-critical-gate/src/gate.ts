@@ -1,4 +1,4 @@
-import { activeCandidateAcceptance, activeRisk, parseAcceptances } from './acceptances.js';
+import { activeCandidateAcceptance, activeRisk, isActive, matchesAlert, parseAcceptances } from './acceptances.js';
 import { isOverdue } from './alerts.js';
 import { packageVersions } from './manifests.js';
 import type { Alert, Candidate, GateResult } from './types.js';
@@ -23,14 +23,20 @@ export async function evaluateGate(input: GateInput): Promise<GateResult> {
     input.now,
   );
   const overdue = input.alerts.filter((alert) => alert.severity === 'critical' && isOverdue(alert, input.now, input.slaHours));
-  const baseBlocked = overdue.filter((alert) => !activeRisk(baseAcceptances, alert));
+  const baseBlocked = overdue.filter((alert) => !activeRisk(baseAcceptances, alert, input.now));
   const candidateBlocked: Alert[] = [];
   const fixed: Alert[] = [];
   const accepted: Alert[] = [];
   const unverified: Record<number, string> = {};
 
   for (const alert of overdue) {
-    if (activeCandidateAcceptance(baseAcceptances, candidateAcceptances, alert, input.candidate.pullRequests)) {
+    if (activeCandidateAcceptance(
+      baseAcceptances,
+      candidateAcceptances,
+      alert,
+      input.candidate.pullRequests,
+      input.now,
+    )) {
       accepted.push(alert);
       continue;
     }
@@ -57,6 +63,10 @@ export async function evaluateGate(input: GateInput): Promise<GateResult> {
       medium: input.alerts.filter((alert) => alert.severity === 'medium').length,
     },
     unverified,
+    staleAcceptances: candidateAcceptances.filter((acceptance) =>
+      !input.alerts.some((alert) => matchesAlert(acceptance, alert)),
+    ),
+    expiredAcceptances: candidateAcceptances.filter((acceptance) => !isActive(acceptance, input.now)),
   };
 }
 
@@ -81,4 +91,3 @@ async function isFixed(input: GateInput, alert: Alert): Promise<boolean> {
     ),
   );
 }
-

@@ -21255,12 +21255,12 @@ var require_log = __commonJS({
       if (logLevel === "debug")
         console.log(...messages);
     }
-    function warn(logLevel, warning) {
+    function warn(logLevel, warning2) {
       if (logLevel === "debug" || logLevel === "warn") {
         if (typeof node_process.emitWarning === "function")
-          node_process.emitWarning(warning);
+          node_process.emitWarning(warning2);
         else
-          console.warn(warning);
+          console.warn(warning2);
       }
     }
     exports2.debug = debug2;
@@ -24729,9 +24729,9 @@ var require_composer = __commonJS({
         this.prelude = [];
         this.errors = [];
         this.warnings = [];
-        this.onError = (source, code, message, warning) => {
+        this.onError = (source, code, message, warning2) => {
           const pos = getErrorPos(source);
-          if (warning)
+          if (warning2)
             this.warnings.push(new errors.YAMLWarning(pos, code, message));
           else
             this.errors.push(new errors.YAMLParseError(pos, code, message));
@@ -24804,10 +24804,10 @@ ${cb}` : comment;
           console.dir(token, { depth: null });
         switch (token.type) {
           case "directive":
-            this.directives.add(token.source, (offset, message, warning) => {
+            this.directives.add(token.source, (offset, message, warning2) => {
               const pos = getErrorPos(token);
               pos[0] += offset;
-              this.onError(pos, "BAD_DIRECTIVE", message, warning);
+              this.onError(pos, "BAD_DIRECTIVE", message, warning2);
             });
             this.prelude.push(token.source);
             this.atDirectives = true;
@@ -26849,7 +26849,7 @@ var require_public_api = __commonJS({
       const doc = parseDocument2(src, options);
       if (!doc)
         return null;
-      doc.warnings.forEach((warning) => log.warn(doc.options.logLevel, warning));
+      doc.warnings.forEach((warning2) => log.warn(doc.options.logLevel, warning2));
       if (doc.errors.length > 0) {
         if (doc.options.logLevel !== "silent")
           throw doc.errors[0];
@@ -38843,6 +38843,9 @@ var ExitCode;
   ExitCode2[ExitCode2["Success"] = 0] = "Success";
   ExitCode2[ExitCode2["Failure"] = 1] = "Failure";
 })(ExitCode || (ExitCode = {}));
+function setSecret(secret) {
+  issueCommand("add-mask", {}, secret);
+}
 function getInput(name, options) {
   const val = process.env[`INPUT_${name.replace(/ /g, "_").toUpperCase()}`] || "";
   if (options && options.required && !val) {
@@ -38867,6 +38870,9 @@ function setFailed(message) {
 }
 function error(message, properties = {}) {
   issueCommand("error", toCommandProperties(properties), message instanceof Error ? message.toString() : message);
+}
+function warning(message, properties = {}) {
+  issueCommand("warning", toCommandProperties(properties), message instanceof Error ? message.toString() : message);
 }
 function info(message) {
   process.stdout.write(message + os4.EOL);
@@ -43077,17 +43083,22 @@ function parseAcceptances(content, now) {
 function matchesAlert(acceptance, alert) {
   return acceptance.alert === alert.number && acceptance.ghsa === alert.ghsa && acceptance.package === alert.package && acceptance.manifest === alert.manifest;
 }
-function activeRisk(acceptances, alert) {
-  return acceptances.some((acceptance) => acceptance.type === "risk" && matchesAlert(acceptance, alert));
+function activeRisk(acceptances, alert, now) {
+  return acceptances.some(
+    (acceptance) => acceptance.type === "risk" && isActive(acceptance, now) && matchesAlert(acceptance, alert)
+  );
 }
-function activeCandidateAcceptance(base, candidate, alert, pullRequests) {
+function activeCandidateAcceptance(base, candidate, alert, pullRequests, now) {
   const baseKeys = new Set(base.map(key));
   return candidate.some((acceptance) => {
-    if (!matchesAlert(acceptance, alert)) {
+    if (!isActive(acceptance, now) || !matchesAlert(acceptance, alert)) {
       return false;
     }
     return acceptance.type === "risk" || !baseKeys.has(key(acceptance)) && acceptance.pullRequest !== void 0 && pullRequests.has(acceptance.pullRequest);
   });
+}
+function isActive(acceptance, now) {
+  return Date.parse(acceptance.expires) > now.getTime();
 }
 function parseAcceptance(value, index, now) {
   const field = `acceptances[${index}]`;
@@ -43114,9 +43125,6 @@ function parseAcceptance(value, index, now) {
   const maximumHours = type === "risk" ? MAX_RISK_HOURS : MAX_REMEDIATION_HOURS;
   if (accepted.getTime() > now.getTime()) {
     throw new Error(`${field}.accepted cannot be in the future.`);
-  }
-  if (expires.getTime() <= now.getTime()) {
-    throw new Error(`${field} has expired.`);
   }
   if (durationHours <= 0 || durationHours > maximumHours) {
     throw new Error(`${field} may last at most ${maximumHours} hours.`);
@@ -45011,13 +45019,19 @@ async function evaluateGate(input) {
     input.now
   );
   const overdue = input.alerts.filter((alert) => alert.severity === "critical" && isOverdue(alert, input.now, input.slaHours));
-  const baseBlocked = overdue.filter((alert) => !activeRisk(baseAcceptances, alert));
+  const baseBlocked = overdue.filter((alert) => !activeRisk(baseAcceptances, alert, input.now));
   const candidateBlocked = [];
   const fixed = [];
   const accepted = [];
   const unverified = {};
   for (const alert of overdue) {
-    if (activeCandidateAcceptance(baseAcceptances, candidateAcceptances, alert, input.candidate.pullRequests)) {
+    if (activeCandidateAcceptance(
+      baseAcceptances,
+      candidateAcceptances,
+      alert,
+      input.candidate.pullRequests,
+      input.now
+    )) {
       accepted.push(alert);
       continue;
     }
@@ -45041,7 +45055,11 @@ async function evaluateGate(input) {
       high: input.alerts.filter((alert) => alert.severity === "high").length,
       medium: input.alerts.filter((alert) => alert.severity === "medium").length
     },
-    unverified
+    unverified,
+    staleAcceptances: candidateAcceptances.filter(
+      (acceptance) => !input.alerts.some((alert) => matchesAlert(acceptance, alert))
+    ),
+    expiredAcceptances: candidateAcceptances.filter((acceptance) => !isActive(acceptance, input.now))
   };
 }
 function passes(result) {
@@ -45065,9 +45083,9 @@ async function isFixed(input, alert) {
 
 // .github/actions/dependabot-critical-gate/src/github.ts
 var MAX_BLOB_BYTES = 10 * 1024 * 1024;
-async function resolveCandidate(octokit, owner, repo, eventName, payload) {
+async function resolveCandidate(octokit, owner, repo, eventName, payload, pause = delay) {
   if (eventName === "pull_request_target") {
-    return pullRequestCandidate(octokit, owner, repo, payload);
+    return pullRequestCandidate(octokit, owner, repo, payload, pause);
   }
   if (eventName === "merge_group") {
     return mergeGroupCandidate(octokit, owner, repo, payload);
@@ -45148,7 +45166,7 @@ var RepositoryReader = class {
     return treeSha;
   }
 };
-async function pullRequestCandidate(octokit, owner, repo, payload) {
+async function pullRequestCandidate(octokit, owner, repo, payload, pause) {
   const eventPull = object3(payload.pull_request, "pull_request");
   const number = positiveInteger(payload.number, "pull request number");
   const eventHead = requiredString3(object3(eventPull.head, "pull_request.head").sha, "pull_request.head.sha");
@@ -45174,7 +45192,7 @@ async function pullRequestCandidate(octokit, owner, repo, payload) {
       };
     }
     if (attempt < 6) {
-      await delay(2e3);
+      await pause(2e3);
     }
   }
   throw new Error("GitHub did not produce a stable pull request merge result. Re-run the gate.");
@@ -45240,6 +45258,8 @@ async function run() {
     const acceptancePath = getInput("acceptance-file", { required: true });
     const slaHours = positiveInteger2(getInput("sla-hours", { required: true }), "sla-hours");
     const { owner, repo } = context2.repo;
+    setSecret(alertsToken);
+    setSecret(repositoryToken);
     const repositoryClient = getOctokit(repositoryToken);
     const alertsClient = getOctokit(alertsToken);
     const candidate = await resolveCandidate(
@@ -45268,6 +45288,12 @@ async function run() {
     await writeSummary(result, alerts, slaHours);
     setOutput("base-blocked-count", result.baseBlocked.length);
     setOutput("candidate-blocked-count", result.candidateBlocked.length);
+    for (const acceptance of result.staleAcceptances) {
+      warning(`Acceptance for alert #${acceptance.alert} does not match an open alert and should be removed.`);
+    }
+    for (const acceptance of result.expiredAcceptances) {
+      warning(`Acceptance for alert #${acceptance.alert} has expired and no longer applies.`);
+    }
     if (!passes(result)) {
       for (const alert of result.candidateBlocked) {
         error(finding(alert, result.unverified[alert.number]));
@@ -45285,7 +45311,7 @@ async function run() {
       info("No overdue unaccepted Critical alerts. The gate passes.");
     }
   } catch (error2) {
-    setFailed(error2 instanceof Error ? error2.message : String(error2));
+    setFailed(failureMessage(error2));
   }
 }
 async function writeSummary(result, alerts, slaHours) {
@@ -45297,7 +45323,8 @@ async function writeSummary(result, alerts, slaHours) {
     `Blocking after this change: ${result.candidateBlocked.length}`,
     `Fixed by this change: ${result.fixed.length}`,
     `Covered by reviewed acceptance: ${result.accepted.length}`,
-    `Open High: ${result.reported.high}; open Medium: ${result.reported.medium} (report only)`
+    `Open High: ${result.reported.high}; open Medium: ${result.reported.medium} (report only)`,
+    `Stale acceptances: ${result.staleAcceptances.length}; expired acceptances: ${result.expiredAcceptances.length}`
   ]);
   if (result.candidateBlocked.length > 0) {
     summary.addHeading("Alerts that remain", 3).addTable([
@@ -45328,5 +45355,21 @@ function positiveInteger2(value, field) {
     throw new Error(`${field} must be a positive integer.`);
   }
   return Number(value);
+}
+function failureMessage(error2) {
+  const status = typeof error2 === "object" && error2 !== null && "status" in error2 ? Number(error2.status) : null;
+  if (status === 403 || status === 404) {
+    return `GitHub denied required repository data (HTTP ${status}). Confirm that Dependabot alerts are enabled, the GitHub App covers this repository, and both organization secrets are available.`;
+  }
+  if (status === 409 || status === 422) {
+    return `GitHub could not provide a stable candidate merge result (HTTP ${status}). Update the branch and re-run the gate.`;
+  }
+  if (status === 429) {
+    return "GitHub rate-limited the gate. Re-run it after the rate limit resets.";
+  }
+  if (status !== null && status >= 500) {
+    return `GitHub returned a server error (HTTP ${status}). Re-run the gate.`;
+  }
+  return error2 instanceof Error ? error2.message : String(error2);
 }
 void run();

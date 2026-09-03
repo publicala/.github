@@ -24,6 +24,15 @@ test('reads every npm v1 and v3 copy', () => {
   assert.deepEqual(packageVersions('package-lock.json', content, '@scope/example'), ['3.0.0']);
 });
 
+test('reads npm lockfile version 2', () => {
+  const content = JSON.stringify({
+    lockfileVersion: 2,
+    packages: { 'node_modules/example': { version: '1.2.3' } },
+    dependencies: { example: { version: '1.2.3' } },
+  });
+  assert.deepEqual(packageVersions('nested/package-lock.json', content, 'example'), ['1.2.3']);
+});
+
 test('reads Yarn classic and Berry lockfiles', () => {
   const classic = 'example@^1.0.0, example@~1.2.0:\n  version "1.2.3"\n  resolved "https://example.test"\n';
   const berry = '__metadata:\n  version: 8\n\n"example@npm:^2.0.0":\n  version: 2.1.0\n  resolution: "example@npm:2.1.0"\n';
@@ -61,4 +70,3 @@ test('fails closed on unsupported manifests and invalid documents', () => {
   assert.throws(() => packageVersions('go.sum', '', 'example'), /Unsupported manifest/);
   assert.throws(() => packageVersions('package-lock.json', '{', 'example'), /invalid JSON/);
 });
-

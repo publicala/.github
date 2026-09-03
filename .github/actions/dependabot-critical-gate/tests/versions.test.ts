@@ -18,3 +18,9 @@ test('rejects values it cannot compare', () => {
   assert.throws(() => isVulnerable('cargo', '1.0.0', '< 2'), /Unsupported ecosystem/);
 });
 
+test('handles prerelease, build, platform, and PEP 440 versions', () => {
+  assert.equal(isVulnerable('npm', '1.0.0-beta.1+build.7', '< 1.0.0'), true);
+  assert.equal(isVulnerable('composer', 'v1.2.3+build.7', '< 2.0.0'), true);
+  assert.equal(isVulnerable('rubygems', '1.2.3.pre.1', '< 1.2.3'), true);
+  assert.equal(isVulnerable('pip', '1!2.0.post1', '< 1!3.0'), true);
+});

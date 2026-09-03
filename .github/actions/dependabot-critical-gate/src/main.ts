@@ -12,6 +12,8 @@ async function run(): Promise<void> {
     const acceptancePath = core.getInput('acceptance-file', { required: true });
     const slaHours = positiveInteger(core.getInput('sla-hours', { required: true }), 'sla-hours');
     const { owner, repo } = github.context.repo;
+    core.setSecret(alertsToken);
+    core.setSecret(repositoryToken);
     const repositoryClient = github.getOctokit(repositoryToken);
     const alertsClient = github.getOctokit(alertsToken);
     const candidate = await resolveCandidate(
@@ -42,6 +44,13 @@ async function run(): Promise<void> {
     core.setOutput('base-blocked-count', result.baseBlocked.length);
     core.setOutput('candidate-blocked-count', result.candidateBlocked.length);
 
+    for (const acceptance of result.staleAcceptances) {
+      core.warning(`Acceptance for alert #${acceptance.alert} does not match an open alert and should be removed.`);
+    }
+    for (const acceptance of result.expiredAcceptances) {
+      core.warning(`Acceptance for alert #${acceptance.alert} has expired and no longer applies.`);
+    }
+
     if (!passes(result)) {
       for (const alert of result.candidateBlocked) {
         core.error(finding(alert, result.unverified[alert.number]));
@@ -62,7 +71,7 @@ async function run(): Promise<void> {
       core.info('No overdue unaccepted Critical alerts. The gate passes.');
     }
   } catch (error) {
-    core.setFailed(error instanceof Error ? error.message : String(error));
+    core.setFailed(failureMessage(error));
   }
 }
 
@@ -78,6 +87,7 @@ async function writeSummary(result: GateResult, alerts: Alert[], slaHours: numbe
       `Fixed by this change: ${result.fixed.length}`,
       `Covered by reviewed acceptance: ${result.accepted.length}`,
       `Open High: ${result.reported.high}; open Medium: ${result.reported.medium} (report only)`,
+      `Stale acceptances: ${result.staleAcceptances.length}; expired acceptances: ${result.expiredAcceptances.length}`,
     ]);
 
   if (result.candidateBlocked.length > 0) {
@@ -117,5 +127,26 @@ function positiveInteger(value: string, field: string): number {
   return Number(value);
 }
 
-void run();
+function failureMessage(error: unknown): string {
+  const status = typeof error === 'object' && error !== null && 'status' in error
+    ? Number(error.status)
+    : null;
 
+  if (status === 403 || status === 404) {
+    return `GitHub denied required repository data (HTTP ${status}). Confirm that Dependabot alerts are enabled, `
+      + 'the GitHub App covers this repository, and both organization secrets are available.';
+  }
+  if (status === 409 || status === 422) {
+    return `GitHub could not provide a stable candidate merge result (HTTP ${status}). Update the branch and re-run the gate.`;
+  }
+  if (status === 429) {
+    return 'GitHub rate-limited the gate. Re-run it after the rate limit resets.';
+  }
+  if (status !== null && status >= 500) {
+    return `GitHub returned a server error (HTTP ${status}). Re-run the gate.`;
+  }
+
+  return error instanceof Error ? error.message : String(error);
+}
+
+void run();

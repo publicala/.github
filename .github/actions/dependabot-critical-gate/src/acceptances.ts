@@ -54,8 +54,10 @@ export function matchesAlert(acceptance: Acceptance, alert: Alert): boolean {
     && acceptance.manifest === alert.manifest;
 }
 
-export function activeRisk(acceptances: Acceptance[], alert: Alert): boolean {
-  return acceptances.some((acceptance) => acceptance.type === 'risk' && matchesAlert(acceptance, alert));
+export function activeRisk(acceptances: Acceptance[], alert: Alert, now: Date): boolean {
+  return acceptances.some((acceptance) =>
+    acceptance.type === 'risk' && isActive(acceptance, now) && matchesAlert(acceptance, alert),
+  );
 }
 
 export function activeCandidateAcceptance(
@@ -63,11 +65,12 @@ export function activeCandidateAcceptance(
   candidate: Acceptance[],
   alert: Alert,
   pullRequests: Set<number>,
+  now: Date,
 ): boolean {
   const baseKeys = new Set(base.map(key));
 
   return candidate.some((acceptance) => {
-    if (!matchesAlert(acceptance, alert)) {
+    if (!isActive(acceptance, now) || !matchesAlert(acceptance, alert)) {
       return false;
     }
 
@@ -77,6 +80,10 @@ export function activeCandidateAcceptance(
       && pullRequests.has(acceptance.pullRequest)
     );
   });
+}
+
+export function isActive(acceptance: Acceptance, now: Date): boolean {
+  return Date.parse(acceptance.expires) > now.getTime();
 }
 
 function parseAcceptance(value: unknown, index: number, now: Date): Acceptance {
@@ -98,9 +105,6 @@ function parseAcceptance(value: unknown, index: number, now: Date): Acceptance {
 
   if (accepted.getTime() > now.getTime()) {
     throw new Error(`${field}.accepted cannot be in the future.`);
-  }
-  if (expires.getTime() <= now.getTime()) {
-    throw new Error(`${field} has expired.`);
   }
   if (durationHours <= 0 || durationHours > maximumHours) {
     throw new Error(`${field} may last at most ${maximumHours} hours.`);

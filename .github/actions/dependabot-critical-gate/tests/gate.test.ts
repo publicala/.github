@@ -105,6 +105,22 @@ test('does not block alerts inside the SLA or High and Medium alerts', async () 
   assert.equal(passes(result), true);
 });
 
+test('reports stale and expired acceptances without making them bypass the gate', async () => {
+  const expired = acceptance('risk', 1, 'first')
+    .replace('2026-10-01T00:00:00Z', '2026-09-03T11:59:59Z');
+  const stale = acceptance('risk', 2, 'second');
+  const files = new Map([
+    ['base:.github/security/dependabot-accepted.yml', `version: 1\nacceptances:\n${expired}${stale}`],
+    ['merge:.github/security/dependabot-accepted.yml', `version: 1\nacceptances:\n${expired}${stale}`],
+    ['merge:package-lock.json', npmLock({ first: '1.0.0' })],
+  ]);
+  const result = await evaluateGate(input([alert(1, 'first')], files));
+
+  assert.deepEqual(result.expiredAcceptances.map((item) => item.alert), [1]);
+  assert.deepEqual(result.staleAcceptances.map((item) => item.alert), [2]);
+  assert.equal(passes(result), false);
+});
+
 function input(alerts: Alert[], files: Map<string, string>) {
   return {
     alerts,
