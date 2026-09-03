@@ -29,10 +29,11 @@ async function run(): Promise<void> {
       state: 'open',
       per_page: 100,
     });
-    const alerts = parseAlerts(response);
+    const parsedAlerts = parseAlerts(response);
     const reader = new RepositoryReader(repositoryClient, owner, repo);
     const result = await evaluateGate({
-      alerts,
+      alerts: parsedAlerts.critical,
+      reported: parsedAlerts.reported,
       candidate,
       now: new Date(),
       slaHours,
@@ -40,7 +41,7 @@ async function run(): Promise<void> {
       readFile: (sha, path) => reader.read(sha, path),
     });
 
-    await writeSummary(result, alerts, slaHours);
+    await writeSummary(result, parsedAlerts.critical, slaHours);
     core.setOutput('base-blocked-count', result.baseBlocked.length);
     core.setOutput('candidate-blocked-count', result.candidateBlocked.length);
 
@@ -86,7 +87,7 @@ async function writeSummary(result: GateResult, alerts: Alert[], slaHours: numbe
       `Blocking after this change: ${result.candidateBlocked.length}`,
       `Fixed by this change: ${result.fixed.length}`,
       `Covered by reviewed acceptance: ${result.accepted.length}`,
-      `Open High: ${result.reported.high}; open Medium: ${result.reported.medium} (report only)`,
+      `Open High: ${result.reported.high}; open Medium: ${result.reported.medium}; open Low: ${result.reported.low} (report only)`,
       `Stale acceptances: ${result.staleAcceptances.length}; expired acceptances: ${result.expiredAcceptances.length}`,
     ]);
 

@@ -54,6 +54,9 @@ export class RepositoryReader {
         repo: this.#repo,
         tree_sha: treeSha,
       });
+      if (response.data.truncated === true) {
+        throw new Error(`GitHub truncated the tree that contains ${path}; the file lookup is incomplete.`);
+      }
       const entry = response.data.tree.find((candidate) => candidate.path === part);
 
       if (entry === undefined) {
@@ -123,7 +126,6 @@ async function pullRequestCandidate(
   const eventPull = object(payload.pull_request, 'pull_request');
   const number = positiveInteger(payload.number, 'pull request number');
   const eventHead = requiredString(object(eventPull.head, 'pull_request.head').sha, 'pull_request.head.sha');
-  const eventBase = requiredString(object(eventPull.base, 'pull_request.base').sha, 'pull_request.base.sha');
 
   for (let attempt = 1; attempt <= 6; attempt += 1) {
     const response = await octokit.rest.pulls.get({ owner, repo, pull_number: number });
@@ -132,15 +134,12 @@ async function pullRequestCandidate(
     if (pull.head.sha !== eventHead) {
       throw new Error('The pull request head changed after this run started. Re-run the gate.');
     }
-    if (pull.base.sha !== eventBase) {
-      throw new Error('The base branch changed after this run started. Update the branch or re-run the gate.');
-    }
     if (pull.mergeable === false) {
       throw new Error('GitHub cannot create the pull request merge result because it has conflicts.');
     }
     if (pull.mergeable === true && pull.merge_commit_sha !== null) {
       return {
-        baseSha: eventBase,
+        baseSha: pull.base.sha,
         headSha: eventHead,
         candidateSha: pull.merge_commit_sha,
         pullRequests: new Set([number]),
@@ -166,14 +165,16 @@ async function mergeGroupCandidate(
   const headSha = requiredString(group.head_sha, 'merge_group.head_sha');
   const pullRequests = new Set<number>();
 
-  const pulls = await octokit.paginate(octokit.rest.repos.listPullRequestsAssociatedWithCommit, {
-    owner,
-    repo,
-    commit_sha: headSha,
-    per_page: 100,
-  });
-  for (const pull of pulls) {
-    pullRequests.add(pull.number);
+  for (const commitSha of await comparedCommitShas(octokit, owner, repo, baseSha, headSha)) {
+    const pulls = await octokit.paginate(octokit.rest.repos.listPullRequestsAssociatedWithCommit, {
+      owner,
+      repo,
+      commit_sha: commitSha,
+      per_page: 100,
+    });
+    for (const pull of pulls) {
+      pullRequests.add(pull.number);
+    }
   }
 
   const headRef = typeof group.head_ref === 'string' ? group.head_ref : '';
@@ -185,6 +186,31 @@ async function mergeGroupCandidate(
   }
 
   return { baseSha, headSha, candidateSha: headSha, pullRequests };
+}
+
+async function comparedCommitShas(
+  octokit: Octokit,
+  owner: string,
+  repo: string,
+  baseSha: string,
+  headSha: string,
+): Promise<string[]> {
+  const shas: string[] = [];
+
+  for (let page = 1; ; page += 1) {
+    const response = await octokit.rest.repos.compareCommitsWithBasehead({
+      owner,
+      repo,
+      basehead: `${baseSha}...${headSha}`,
+      page,
+      per_page: 100,
+    });
+    shas.push(...response.data.commits.map((commit) => commit.sha));
+
+    if (shas.length >= response.data.total_commits || response.data.commits.length < 100) {
+      return shas;
+    }
+  }
 }
 
 function validatePath(path: string): void {

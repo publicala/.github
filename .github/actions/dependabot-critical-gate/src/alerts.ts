@@ -2,12 +2,35 @@ import type { Alert, Severity, Vulnerability } from './types.js';
 
 type JsonObject = Record<string, unknown>;
 
-export function parseAlerts(input: unknown): Alert[] {
+export interface ParsedAlerts {
+  critical: Alert[];
+  reported: Record<'high' | 'medium' | 'low', number>;
+}
+
+export function parseAlerts(input: unknown): ParsedAlerts {
   if (!Array.isArray(input)) {
     throw new Error('The Dependabot alerts response is not an array.');
   }
 
-  return input.map(parseAlert);
+  const critical: Alert[] = [];
+  const reported = { high: 0, medium: 0, low: 0 };
+
+  for (const [index, value] of input.entries()) {
+    const alert = object(value, `alerts[${index}]`);
+    const advisory = object(alert.security_advisory, `alerts[${index}].security_advisory`);
+    const severity = requiredString(advisory.severity, `alerts[${index}].security_advisory.severity`).toLowerCase();
+
+    if (!isSeverity(severity)) {
+      throw new Error(`Alert #${String(alert.number)} has an unknown severity.`);
+    }
+    if (severity === 'critical') {
+      critical.push(parseAlert(value));
+    } else {
+      reported[severity] += 1;
+    }
+  }
+
+  return { critical, reported };
 }
 
 export function isOverdue(alert: Alert, now: Date, slaHours: number): boolean {

@@ -46,16 +46,18 @@ function composerLock(content: string, target: string): PackageOccurrence[] {
   if (document['packages-dev'] !== undefined && !Array.isArray(document['packages-dev'])) {
     throw new Error('composer.lock packages-dev is not an array.');
   }
-  return [
+  const sections: [string, unknown[]][] = [
     ['packages', document.packages],
     ['packages-dev', arrayOrEmpty(document['packages-dev'])],
-  ].flatMap(([section, packages]) => (packages as unknown[]).flatMap((value) => {
-      const item = asObject(value);
-      if (item === null || !sameName(item.name, target)) {
-        return [];
-      }
-      return [occurrence(`${String(section)}:${target}`, item.version, target, 'composer.lock')];
-    }));
+  ];
+
+  return sections.flatMap(([section, packages]) => packages.flatMap((value) => {
+    const item = asObject(value);
+    if (item === null || !sameName(item.name, target)) {
+      return [];
+    }
+    return [occurrence(`${section}:${target}`, item.version, target, 'composer.lock')];
+  }));
 }
 
 function npmLock(content: string, target: string): PackageOccurrence[] {
@@ -247,9 +249,9 @@ function cleanPnpmVersion(version: string): string {
 function gemfileLock(content: string, target: string): PackageOccurrence[] {
   const occurrences: PackageOccurrence[] = [];
   for (const line of content.split(/\r?\n/)) {
-    const match = line.match(/^    ([A-Za-z0-9_.-]+) \(([^ )]+)(?: ([^)]*))?\)$/);
+    const match = line.match(/^    ([A-Za-z0-9_.-]+) \(([0-9][0-9A-Za-z.]*)(?:-([^ )]+))?(?: ([^)]*))?\)$/);
     if (match?.[1] !== undefined && match[2] !== undefined && sameName(match[1], target)) {
-      occurrences.push({ locator: `gem:${target}:${match[3] ?? 'ruby'}`, version: match[2] });
+      occurrences.push({ locator: `gem:${target}:${match[3] ?? match[4] ?? 'ruby'}`, version: match[2] });
     }
   }
   return occurrences;

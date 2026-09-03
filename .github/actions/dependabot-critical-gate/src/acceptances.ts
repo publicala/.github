@@ -67,7 +67,7 @@ export function activeCandidateAcceptance(
   pullRequests: Set<number>,
   now: Date,
 ): boolean {
-  const baseKeys = new Set(base.map(key));
+  const baseKeys = new Set(base.map(identityKey));
 
   return candidate.some((acceptance) => {
     if (!isActive(acceptance, now) || !matchesAlert(acceptance, alert)) {
@@ -75,7 +75,7 @@ export function activeCandidateAcceptance(
     }
 
     return acceptance.type === 'risk' || (
-      !baseKeys.has(key(acceptance))
+      !baseKeys.has(identityKey(acceptance))
       && acceptance.pullRequest !== undefined
       && pullRequests.has(acceptance.pullRequest)
     );
@@ -140,8 +140,14 @@ function parseAcceptance(value: unknown, index: number, now: Date): Acceptance {
   };
 }
 
-function key(acceptance: Acceptance): string {
-  return JSON.stringify(acceptance);
+function identityKey(acceptance: Acceptance): string {
+  return JSON.stringify([
+    acceptance.type,
+    acceptance.alert,
+    acceptance.ghsa,
+    acceptance.package,
+    acceptance.manifest,
+  ]);
 }
 
 function requiredDate(value: unknown, field: string): Date {

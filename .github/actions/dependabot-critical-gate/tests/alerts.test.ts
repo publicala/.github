@@ -20,7 +20,7 @@ test('parses every matching advisory range', () => {
         { package: { ecosystem: 'pip', name: 'example' }, vulnerable_version_range: '< 9' },
       ],
     },
-  }]);
+  }]).critical;
 
   assert.equal(alerts.length, 1);
   assert.deepEqual(alerts[0]?.vulnerabilities.map((item) => item.vulnerableRange), ['< 1.2.0', '>= 2, < 2.1']);
@@ -43,7 +43,7 @@ test('keeps non-Python advisory package identities exact', () => {
         { package: { ecosystem: 'npm', name: 'foo_bar' }, vulnerable_version_range: '< 2.0.0' },
       ],
     },
-  }])[0];
+  }]).critical[0];
 
   assert.deepEqual(alert?.vulnerabilities.map((item) => item.vulnerableRange), ['< 2.0.0']);
 });
@@ -64,7 +64,7 @@ test('normalizes a root-prefixed manifest to a repository-relative path', () => 
         { package: { ecosystem: 'npm', name: 'example' }, vulnerable_version_range: '< 1.2.0' },
       ],
     },
-  }])[0];
+  }]).critical[0];
 
   assert.equal(alert?.manifest, 'package-lock.json');
 });
@@ -80,7 +80,7 @@ test('treats the SLA boundary as overdue', () => {
       severity: 'critical',
       vulnerabilities: [{ package: { ecosystem: 'composer', name: 'a/b' }, vulnerable_version_range: '< 2.0' }],
     },
-  }])[0];
+  }]).critical[0];
 
   assert.ok(alert);
   assert.equal(isOverdue(alert, new Date('2026-01-08T00:00:00Z'), 168), true);
@@ -88,7 +88,21 @@ test('treats the SLA boundary as overdue', () => {
 });
 
 test('rejects incomplete alert data', () => {
-  assert.throws(() => parseAlerts([{ number: 1 }]), /alert\.dependency is not an object/);
+  assert.throws(() => parseAlerts([{
+    number: 1,
+    security_advisory: { severity: 'critical' },
+  }]), /alert\.dependency is not an object/);
+});
+
+test('reports non-Critical severities without parsing optional dependency data', () => {
+  const alerts = parseAlerts([
+    { number: 1, security_advisory: { severity: 'high' } },
+    { number: 2, security_advisory: { severity: 'medium' } },
+    { number: 3, security_advisory: { severity: 'low' } },
+  ]);
+
+  assert.deepEqual(alerts.critical, []);
+  assert.deepEqual(alerts.reported, { high: 1, medium: 1, low: 1 });
 });
 
 test('rejects a manifest path that does not identify a file', () => {

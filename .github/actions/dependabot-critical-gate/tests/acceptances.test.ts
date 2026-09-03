@@ -52,6 +52,19 @@ test('allows a new remediation only for its pull request and for 48 hours', () =
   );
 });
 
+test('does not revive a base remediation by editing mutable fields', () => {
+  const base = parseAcceptances(file('remediation', {
+    pull_request: 22,
+    reason: 'Original attestation.',
+  }), now);
+  const edited = parseAcceptances(file('remediation', {
+    pull_request: 22,
+    reason: 'Edited attestation.',
+  }), now);
+
+  assert.equal(activeCandidateAcceptance(base, edited, alert, new Set([22]), now), false);
+});
+
 test('rejects aliases, unknown fields, and duplicate entries', () => {
   assert.throws(() => parseAcceptances('version: 1\nacceptances: &items []\ncopy: *items\n', now), /unknown field|alias/i);
   assert.throws(() => parseAcceptances(`${file('risk')}  - type: risk\n    alert: 7\n`, now), /must be a non-empty string/);

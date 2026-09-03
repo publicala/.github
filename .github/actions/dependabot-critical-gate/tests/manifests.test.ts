@@ -67,11 +67,12 @@ test('reads pnpm lockfile formats', () => {
 });
 
 test('reads RubyGems and Python lock formats', () => {
-  const gems = 'GEM\n  specs:\n    rack (2.2.8)\n      ruby2_keywords (~> 0.0)\n';
+  const gems = 'GEM\n  specs:\n    rack (2.2.8)\n      ruby2_keywords (~> 0.0)\n    nokogiri (1.13.6-x86_64-linux)\n';
   const requirements = 'Django==5.1.2 # pinned\nrequests[socks]===2.32.0; python_version > "3"\n';
   const pipfile = JSON.stringify({ default: { django: { version: '==5.1.2' } } });
   const poetry = '[[package]]\nname = "Django"\nversion = "5.1.2"\n';
   assert.deepEqual(packageVersions('Gemfile.lock', gems, 'rack'), ['2.2.8']);
+  assert.deepEqual(packageVersions('Gemfile.lock', gems, 'nokogiri'), ['1.13.6']);
   assert.deepEqual(packageVersions('requirements.txt', requirements, 'django'), ['5.1.2']);
   assert.deepEqual(packageVersions('requirements.txt', requirements, 'requests'), ['2.32.0']);
   assert.deepEqual(packageVersions('Pipfile.lock', pipfile, 'Django'), ['5.1.2']);

@@ -45,7 +45,7 @@ export interface GateResult {
   candidateBlocked: Alert[];
   fixed: Alert[];
   accepted: Alert[];
-  reported: Record<'high' | 'medium', number>;
+  reported: Record<'high' | 'medium' | 'low', number>;
   unverified: Record<number, string>;
   staleAcceptances: Acceptance[];
   expiredAcceptances: Acceptance[];

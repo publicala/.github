@@ -54,7 +54,21 @@ test('rejects an oversized blob', async () => {
   await assert.rejects(() => reader.read('merge', 'package-lock.json'), /larger than the 10 MiB/);
 });
 
-test('uses GitHub synthetic merge result and rejects stale event data', async () => {
+test('rejects a truncated repository tree', async () => {
+  const octokit = {
+    rest: {
+      git: {
+        getCommit: async () => ({ data: { tree: { sha: 'root' } } }),
+        getTree: async () => ({ data: { tree: [], truncated: true } }),
+      },
+    },
+  };
+  const reader = new RepositoryReader(octokit as never, 'acme', 'repo');
+
+  await assert.rejects(() => reader.read('merge', 'package-lock.json'), /truncated.*lookup is incomplete/);
+});
+
+test('uses the live base with GitHub synthetic merge result and rejects a stale head', async () => {
   const pull = {
     data: {
       head: { sha: 'head' },
@@ -72,6 +86,13 @@ test('uses GitHub synthetic merge result and rejects stale event data', async ()
   assert.deepEqual(
     await resolveCandidate(octokit as never, 'acme', 'repo', 'pull_request_target', payload),
     { baseSha: 'base', headSha: 'head', candidateSha: 'merge', pullRequests: new Set([22]) },
+  );
+
+  pull.data.base.sha = 'current-base';
+  pull.data.merge_commit_sha = 'current-merge';
+  assert.deepEqual(
+    await resolveCandidate(octokit as never, 'acme', 'repo', 'pull_request_target', payload),
+    { baseSha: 'current-base', headSha: 'head', candidateSha: 'current-merge', pullRequests: new Set([22]) },
   );
 
   pull.data.head.sha = 'new-head';
@@ -113,8 +134,17 @@ test('propagates GitHub API errors instead of passing', async () => {
 
 test('uses the merge-group SHA and finds its pull requests', async () => {
   const octokit = {
-    rest: { repos: { listPullRequestsAssociatedWithCommit: () => undefined } },
-    paginate: async () => [{ number: 21 }, { number: 22 }],
+    rest: {
+      repos: {
+        compareCommitsWithBasehead: async () => ({
+          data: { total_commits: 2, commits: [{ sha: 'commit-1' }, { sha: 'commit-2' }] },
+        }),
+        listPullRequestsAssociatedWithCommit: () => undefined,
+      },
+    },
+    paginate: async (_endpoint: unknown, input: { commit_sha: string }) => (
+      input.commit_sha === 'commit-1' ? [{ number: 21 }] : [{ number: 22 }]
+    ),
   };
   const result = await resolveCandidate(octokit as never, 'acme', 'repo', 'merge_group', {
     merge_group: { base_sha: 'base', head_sha: 'group', head_ref: 'refs/heads/gh-readonly-queue/main/pr-23-abcd' },

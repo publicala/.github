@@ -93,7 +93,7 @@ test('fails closed when a vulnerable occurrence is replaced at another location'
   const result = await evaluateGate(input([alert(1, 'first')], files));
 
   assert.equal(passes(result), false);
-  assert.match(result.unverified[1] ?? '', /occurrence node_modules\/first is missing/);
+  assert.match(result.unverified[1] ?? '', /occurrence "node_modules\/first" is missing/);
   assert.deepEqual(result.fixed, []);
 });
 
@@ -220,6 +220,11 @@ function input(alerts: Alert[], files: Map<string, string>) {
 
   return {
     alerts,
+    reported: {
+      high: alerts.filter((item) => item.severity === 'high').length,
+      medium: alerts.filter((item) => item.severity === 'medium').length,
+      low: alerts.filter((item) => item.severity === 'low').length,
+    },
     candidate,
     now,
     slaHours: 168,

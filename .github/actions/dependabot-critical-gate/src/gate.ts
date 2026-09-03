@@ -6,6 +6,7 @@ import { isVulnerable } from './versions.js';
 
 export interface GateInput {
   alerts: Alert[];
+  reported: Record<'high' | 'medium' | 'low', number>;
   candidate: Candidate;
   now: Date;
   slaHours: number;
@@ -58,10 +59,7 @@ export async function evaluateGate(input: GateInput): Promise<GateResult> {
     candidateBlocked,
     fixed,
     accepted,
-    reported: {
-      high: input.alerts.filter((alert) => alert.severity === 'high').length,
-      medium: input.alerts.filter((alert) => alert.severity === 'medium').length,
-    },
+    reported: input.reported,
     unverified,
     staleAcceptances: candidateAcceptances.filter((acceptance) =>
       !input.alerts.some((alert) => matchesAlert(acceptance, alert)),
@@ -102,7 +100,9 @@ async function isFixed(input: GateInput, alert: Alert): Promise<boolean> {
   for (const baseOccurrence of baseOccurrences.filter((occurrence) => isOccurrenceVulnerable(alert, occurrence.version))) {
     const candidateIndex = unmatchedCandidates.findIndex((occurrence) => occurrence.locator === baseOccurrence.locator);
     if (candidateIndex === -1) {
-      throw new Error(`${alert.package} occurrence ${baseOccurrence.locator} is missing; dependency removal is not proven.`);
+      throw new Error(
+        `${alert.package} occurrence ${JSON.stringify(baseOccurrence.locator)} is missing; dependency removal is not proven.`,
+      );
     }
     unmatchedCandidates.splice(candidateIndex, 1);
   }
