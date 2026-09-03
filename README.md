@@ -28,7 +28,7 @@ Decision flow:
   - Fewer blocked alerts than the base: pass, so fixes can land one at a time.
   - Same or more blocked alerts: fail.
 
-The gate reads the exact synthetic merge commit from the GitHub Git Data API. It supports Composer, npm, Yarn, pnpm, RubyGems, exact pip requirements, Pipenv, Poetry, and uv lockfiles. It checks every vulnerable range in the advisory and every installed copy of the package. Unknown formats and dependency removals fail closed for that alert. A removal uses the reviewed 48-hour remediation entry because a lockfile alone cannot prove that a later install will not restore the package.
+The gate reads the exact synthetic merge commit from the GitHub Git Data API. It supports Composer, npm, Yarn, pnpm, RubyGems, exact pip requirements, Pipenv, Poetry, and uv lockfiles. It checks every vulnerable range in the advisory and every installed copy of the package. Unknown formats and dependency removals fail closed for that alert. A removal uses the reviewed 48-hour remediation entry because a lockfile alone cannot prove that a later install will not restore the package. A Yarn upgrade that changes a selector also uses this entry because `yarn.lock` does not preserve a stable dependency location across that change.
 
 ### Reviewed acceptances
 
