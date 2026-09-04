@@ -7,11 +7,14 @@ test('loads the committed CommonJS action bundle under Node', () => {
     encoding: 'utf8',
     env: {
       ...process.env,
+      GITHUB_EVENT_NAME: 'pull_request_target',
       'INPUT_ALERTS-TOKEN': '',
     },
   });
+  const output = `${result.stdout}\n${result.stderr}`;
 
   assert.equal(result.status, 1);
-  assert.match(`${result.stdout}\n${result.stderr}`, /Input required and not supplied: alerts-token/);
-  assert.doesNotMatch(`${result.stdout}\n${result.stderr}`, /require is not defined/);
+  assert.match(output, /The gate could not complete/);
+  assert.doesNotMatch(output, /require is not defined/);
+  assert.doesNotMatch(output, /Input required and not supplied/);
 });

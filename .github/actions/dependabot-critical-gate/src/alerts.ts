@@ -1,150 +1,71 @@
-import type { Alert, Severity, Vulnerability } from './types.js';
+import { repositoryPath } from './paths.js';
 
 type JsonObject = Record<string, unknown>;
 
-export interface ParsedAlerts {
-  critical: Alert[];
-  reported: Record<'high' | 'medium' | 'low', number>;
-}
+const KNOWN_SEVERITIES = new Set(['critical', 'high', 'medium', 'low']);
+const MAX_ALERTS = 10_000;
 
-export function parseAlerts(input: unknown): ParsedAlerts {
+export function overdueCriticalManifests(
+  input: unknown,
+  now: Date,
+  slaHours: number,
+): Set<string> {
   if (!Array.isArray(input)) {
-    throw new Error('The Dependabot alerts response is not an array.');
+    throw new Error('The Dependabot alerts response is incomplete.');
   }
 
-  const critical: Alert[] = [];
-  const reported = { high: 0, medium: 0, low: 0 };
+  if (input.length > MAX_ALERTS) {
+    throw new Error('The Dependabot alerts response exceeds the safety limit.');
+  }
 
-  for (const [index, value] of input.entries()) {
-    const alert = object(value, `alerts[${index}]`);
-    const advisory = object(alert.security_advisory, `alerts[${index}].security_advisory`);
-    const severity = requiredString(advisory.severity, `alerts[${index}].security_advisory.severity`).toLowerCase();
+  if (!Number.isFinite(now.getTime()) || !Number.isSafeInteger(slaHours) || slaHours <= 0) {
+    throw new Error('The gate time configuration is invalid.');
+  }
 
-    if (!isSeverity(severity)) {
-      throw new Error(`Alert #${String(alert.number)} has an unknown severity.`);
+  const manifests = new Set<string>();
+
+  for (const value of input) {
+    const alert = object(value, 'alert');
+    const advisory = object(alert.security_advisory, 'security advisory');
+    const severity = requiredString(advisory.severity, 'severity').toLowerCase();
+
+    if (!KNOWN_SEVERITIES.has(severity)) {
+      throw new Error('A Dependabot alert has an unknown severity.');
     }
-    if (severity === 'critical') {
-      critical.push(parseAlert(value));
-    } else {
-      reported[severity] += 1;
+
+    if (severity !== 'critical') {
+      continue;
     }
+
+    const createdAt = Date.parse(requiredString(alert.created_at, 'created_at'));
+    if (!Number.isFinite(createdAt)) {
+      throw new Error('A Critical Dependabot alert has an invalid creation time.');
+    }
+
+    const age = now.getTime() - createdAt;
+    if (age < slaHours * 60 * 60 * 1_000) {
+      continue;
+    }
+
+    const dependency = object(alert.dependency, 'dependency');
+    manifests.add(repositoryPath(dependency.manifest_path, 'manifest_path', true));
   }
 
-  return { critical, reported };
-}
-
-export function isOverdue(alert: Alert, now: Date, slaHours: number): boolean {
-  const createdAt = Date.parse(alert.createdAt);
-
-  if (!Number.isFinite(createdAt)) {
-    throw new Error(`Alert #${alert.number} has an invalid created_at value.`);
-  }
-
-  return now.getTime() - createdAt >= slaHours * 60 * 60 * 1000;
-}
-
-function parseAlert(value: unknown): Alert {
-  const alert = object(value, 'alert');
-  const dependency = object(alert.dependency, 'alert.dependency');
-  const dependencyPackage = object(dependency.package, 'alert.dependency.package');
-  const advisory = object(alert.security_advisory, 'alert.security_advisory');
-  const severity = requiredString(advisory.severity, 'alert.security_advisory.severity').toLowerCase();
-  const ecosystem = requiredString(dependencyPackage.ecosystem, 'alert.dependency.package.ecosystem').toLowerCase();
-  const packageName = requiredString(dependencyPackage.name, 'alert.dependency.package.name');
-
-  if (!isSeverity(severity)) {
-    throw new Error(`Alert #${String(alert.number)} has an unknown severity.`);
-  }
-
-  const vulnerabilities = array(advisory.vulnerabilities, 'alert.security_advisory.vulnerabilities')
-    .map(parseVulnerability)
-    .filter((item) =>
-      item.ecosystem === ecosystem
-      && samePackageName(ecosystem, item.name, packageName),
-    );
-
-  if (vulnerabilities.length === 0) {
-    throw new Error(`Alert #${String(alert.number)} has no vulnerability range for its dependency.`);
-  }
-
-  return {
-    number: requiredPositiveInteger(alert.number, 'alert.number'),
-    ghsa: requiredString(advisory.ghsa_id, 'alert.security_advisory.ghsa_id'),
-    severity,
-    createdAt: requiredString(alert.created_at, 'alert.created_at'),
-    manifest: repositoryPath(dependency.manifest_path, 'alert.dependency.manifest_path'),
-    ecosystem,
-    package: packageName,
-    vulnerabilities,
-    htmlUrl: requiredString(alert.html_url, 'alert.html_url'),
-  };
-}
-
-function repositoryPath(value: unknown, field: string): string {
-  const path = requiredString(value, field).replace(/^\/+/, '');
-
-  if (path === '') {
-    throw new Error(`${field} does not identify a repository file.`);
-  }
-
-  return path;
-}
-
-function parseVulnerability(value: unknown): Vulnerability {
-  const vulnerability = object(value, 'vulnerability');
-  const packageValue = object(vulnerability.package, 'vulnerability.package');
-
-  return {
-    ecosystem: requiredString(packageValue.ecosystem, 'vulnerability.package.ecosystem').toLowerCase(),
-    name: requiredString(packageValue.name, 'vulnerability.package.name'),
-    vulnerableRange: requiredString(vulnerability.vulnerable_version_range, 'vulnerability.vulnerable_version_range'),
-  };
+  return manifests;
 }
 
 function object(value: unknown, field: string): JsonObject {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) {
-    throw new Error(`${field} is not an object.`);
+    throw new Error(`A Dependabot alert has an invalid ${field}.`);
   }
 
   return value as JsonObject;
 }
 
-function array(value: unknown, field: string): unknown[] {
-  if (!Array.isArray(value)) {
-    throw new Error(`${field} is not an array.`);
-  }
-
-  return value;
-}
-
 function requiredString(value: unknown, field: string): string {
   if (typeof value !== 'string' || value.trim() === '') {
-    throw new Error(`${field} is not a non-empty string.`);
+    throw new Error(`A Dependabot alert has an invalid ${field}.`);
   }
 
   return value;
-}
-
-function requiredPositiveInteger(value: unknown, field: string): number {
-  if (!Number.isInteger(value) || Number(value) <= 0) {
-    throw new Error(`${field} is not a positive integer.`);
-  }
-
-  return Number(value);
-}
-
-function isSeverity(value: string): value is Severity {
-  return ['critical', 'high', 'medium', 'low'].includes(value);
-}
-
-function samePackageName(ecosystem: string, value: string, target: string): boolean {
-  if (ecosystem !== 'pip') {
-    return value === target;
-  }
-
-  return normalizePythonName(value) === normalizePythonName(target);
-}
-
-function normalizePythonName(value: string): string {
-  return value.toLowerCase().replace(/[-_.]+/g, '-');
 }

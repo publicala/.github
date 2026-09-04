@@ -1,134 +1,83 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { isOverdue, parseAlerts } from '../src/alerts.js';
+import { overdueCriticalManifests } from '../src/alerts.js';
 
-test('parses every matching advisory range', () => {
-  const alerts = parseAlerts([{
-    number: 12,
-    created_at: '2026-01-01T00:00:00Z',
-    html_url: 'https://github.com/acme/repo/security/dependabot/12',
-    dependency: {
-      manifest_path: 'package-lock.json',
-      package: { ecosystem: 'npm', name: 'example' },
-    },
-    security_advisory: {
-      ghsa_id: 'GHSA-1111-2222-3333',
-      severity: 'critical',
-      vulnerabilities: [
-        { package: { ecosystem: 'npm', name: 'example' }, vulnerable_version_range: '< 1.2.0' },
-        { package: { ecosystem: 'npm', name: 'example' }, vulnerable_version_range: '>= 2, < 2.1' },
-        { package: { ecosystem: 'pip', name: 'example' }, vulnerable_version_range: '< 9' },
-      ],
-    },
-  }]).critical;
+const now = new Date('2026-09-04T12:00:00Z');
 
-  assert.equal(alerts.length, 1);
-  assert.deepEqual(alerts[0]?.vulnerabilities.map((item) => item.vulnerableRange), ['< 1.2.0', '>= 2, < 2.1']);
+test('blocks Critical alerts at and after 168 hours', () => {
+  const manifests = overdueCriticalManifests([
+    alert('critical', '2026-08-28T13:00:00Z', 'inside.json'),
+    alert('critical', '2026-08-28T12:00:00Z', 'boundary.json'),
+    alert('critical', '2026-08-28T11:00:00Z', 'overdue.json'),
+  ], now, 168);
+
+  assert.deepEqual(manifests, new Set(['boundary.json', 'overdue.json']));
 });
 
-test('keeps non-Python advisory package identities exact', () => {
-  const alert = parseAlerts([{
-    number: 12,
-    created_at: '2026-01-01T00:00:00Z',
-    html_url: 'https://github.com/acme/repo/security/dependabot/12',
-    dependency: {
-      manifest_path: 'package-lock.json',
-      package: { ecosystem: 'npm', name: 'foo_bar' },
-    },
-    security_advisory: {
-      ghsa_id: 'GHSA-1111-2222-3333',
-      severity: 'critical',
-      vulnerabilities: [
-        { package: { ecosystem: 'npm', name: 'foo-bar' }, vulnerable_version_range: '< 9.0.0' },
-        { package: { ecosystem: 'npm', name: 'foo_bar' }, vulnerable_version_range: '< 2.0.0' },
-      ],
-    },
-  }]).critical[0];
+test('does not block High, Medium, or Low alerts', () => {
+  const manifests = overdueCriticalManifests([
+    alert('high', '2026-01-01T00:00:00Z'),
+    alert('medium', '2026-01-01T00:00:00Z'),
+    alert('low', '2026-01-01T00:00:00Z'),
+  ], now, 168);
 
-  assert.deepEqual(alert?.vulnerabilities.map((item) => item.vulnerableRange), ['< 2.0.0']);
+  assert.deepEqual(manifests, new Set());
 });
 
-test('normalizes a root-prefixed manifest to a repository-relative path', () => {
-  const alert = parseAlerts([{
-    number: 12,
-    created_at: '2026-01-01T00:00:00Z',
-    html_url: 'https://github.com/acme/repo/security/dependabot/12',
-    dependency: {
-      manifest_path: '/package-lock.json',
-      package: { ecosystem: 'npm', name: 'example' },
-    },
-    security_advisory: {
-      ghsa_id: 'GHSA-1111-2222-3333',
-      severity: 'critical',
-      vulnerabilities: [
-        { package: { ecosystem: 'npm', name: 'example' }, vulnerable_version_range: '< 1.2.0' },
-      ],
-    },
-  }]).critical[0];
+test('normalizes a root-prefixed manifest and removes duplicates', () => {
+  const manifests = overdueCriticalManifests([
+    alert('critical', '2026-01-01T00:00:00Z', '/package-lock.json'),
+    alert('critical', '2026-01-02T00:00:00Z', 'package-lock.json'),
+  ], now, 168);
 
-  assert.equal(alert?.manifest, 'package-lock.json');
+  assert.deepEqual(manifests, new Set(['package-lock.json']));
 });
 
-test('treats the SLA boundary as overdue', () => {
-  const alert = parseAlerts([{
-    number: 1,
-    created_at: '2026-01-01T00:00:00Z',
-    html_url: 'https://example.test/1',
-    dependency: { manifest_path: 'composer.lock', package: { ecosystem: 'composer', name: 'a/b' } },
-    security_advisory: {
-      ghsa_id: 'GHSA-1111-2222-3333',
-      severity: 'critical',
-      vulnerabilities: [{ package: { ecosystem: 'composer', name: 'a/b' }, vulnerable_version_range: '< 2.0' }],
-    },
-  }]).critical[0];
-
-  assert.ok(alert);
-  assert.equal(isOverdue(alert, new Date('2026-01-08T00:00:00Z'), 168), true);
-  assert.equal(isOverdue(alert, new Date('2026-01-07T23:59:59Z'), 168), false);
+test('fails closed for an unknown severity', () => {
+  assert.throws(
+    () => overdueCriticalManifests([alert('unknown', '2026-01-01T00:00:00Z')], now, 168),
+    /unknown severity/,
+  );
 });
 
-test('rejects incomplete alert data', () => {
-  assert.throws(() => parseAlerts([{
-    number: 1,
-    security_advisory: { severity: 'critical' },
-  }]), /alert\.dependency is not an object/);
+test('fails closed for incomplete Critical alert data', () => {
+  assert.throws(
+    () => overdueCriticalManifests([alert('critical', 'not-a-date')], now, 168),
+    /invalid creation time/,
+  );
+  assert.throws(
+    () => overdueCriticalManifests([
+      { security_advisory: { severity: 'critical' }, created_at: '2026-01-01T00:00:00Z' },
+    ], now, 168),
+    /invalid dependency/,
+  );
+  assert.throws(
+    () => overdueCriticalManifests([
+      alert('critical', '2026-01-01T00:00:00Z', '../package-lock.json'),
+    ], now, 168),
+    /unsafe/,
+  );
 });
 
-test('reports non-Critical severities without parsing optional dependency data', () => {
-  const alerts = parseAlerts([
-    { number: 1, security_advisory: { severity: 'high' } },
-    { number: 2, security_advisory: { severity: 'medium' } },
-    { number: 3, security_advisory: { severity: 'low' } },
-  ]);
+test('does not require a manifest before a Critical alert reaches the SLA', () => {
+  const manifests = overdueCriticalManifests([
+    { security_advisory: { severity: 'critical' }, created_at: '2026-09-04T11:00:00Z' },
+  ], now, 168);
 
-  assert.deepEqual(alerts.critical, []);
-  assert.deepEqual(alerts.reported, { high: 1, medium: 1, low: 1 });
+  assert.deepEqual(manifests, new Set());
 });
 
-test('rejects a manifest path that does not identify a file', () => {
-  assert.throws(() => parseAlerts([{
-    number: 1,
-    created_at: '2026-01-01T00:00:00Z',
-    html_url: 'https://example.test/1',
-    dependency: { manifest_path: '/', package: { ecosystem: 'npm', name: 'example' } },
-    security_advisory: {
-      ghsa_id: 'GHSA-1111-2222-3333',
-      severity: 'critical',
-      vulnerabilities: [{ package: { ecosystem: 'npm', name: 'example' }, vulnerable_version_range: '< 2' }],
-    },
-  }]), /does not identify a repository file/);
+test('fails closed for invalid responses, limits, and time configuration', () => {
+  assert.throws(() => overdueCriticalManifests({}, now, 168), /response is incomplete/);
+  assert.throws(() => overdueCriticalManifests(new Array(10_001), now, 168), /safety limit/);
+  assert.throws(() => overdueCriticalManifests([], new Date('invalid'), 168), /time configuration/);
+  assert.throws(() => overdueCriticalManifests([], now, 0), /time configuration/);
 });
 
-test('rejects an unknown severity', () => {
-  assert.throws(() => parseAlerts([{
-    number: 1,
-    created_at: '2026-01-01T00:00:00Z',
-    html_url: 'https://example.test/1',
-    dependency: { manifest_path: 'package-lock.json', package: { ecosystem: 'npm', name: 'example' } },
-    security_advisory: {
-      ghsa_id: 'GHSA-1111-2222-3333',
-      severity: 'urgent',
-      vulnerabilities: [{ package: { ecosystem: 'npm', name: 'example' }, vulnerable_version_range: '< 2' }],
-    },
-  }]), /unknown severity/);
-});
+function alert(severity: string, createdAt: string, manifest = 'package-lock.json'): unknown {
+  return {
+    created_at: createdAt,
+    dependency: { manifest_path: manifest },
+    security_advisory: { severity },
+  };
+}

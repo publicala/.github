@@ -1,153 +1,106 @@
 import * as core from '@actions/core';
 import * as github from '@actions/github';
-import { parseAlerts } from './alerts.js';
-import { evaluateGate, passes } from './gate.js';
-import { RepositoryReader, resolveCandidate } from './github.js';
-import type { Alert, GateResult } from './types.js';
+import { overdueCriticalManifests } from './alerts.js';
+import { decideGate } from './gate.js';
+import { readPullRequestEvidence } from './github.js';
+
+type JsonObject = Record<string, unknown>;
+
+const PASS_MESSAGE = 'This repository has no blocking Dependabot condition.';
+const BLOCK_MESSAGE = 'Repository maintainers must review Dependabot alerts in the Security view.';
+const ERROR_MESSAGE = 'The gate could not complete. Repository maintainers must inspect this run.';
 
 async function run(): Promise<void> {
   try {
+    if (github.context.eventName !== 'pull_request_target') {
+      throw new Error('The gate received an unsupported event.');
+    }
+
     const alertsToken = core.getInput('alerts-token', { required: true });
     const repositoryToken = core.getInput('repository-token', { required: true });
-    const acceptancePath = core.getInput('acceptance-file', { required: true });
-    const slaHours = positiveInteger(core.getInput('sla-hours', { required: true }), 'sla-hours');
-    const { owner, repo } = github.context.repo;
+    const slaHours = positiveInteger(core.getInput('sla-hours', { required: true }));
     core.setSecret(alertsToken);
     core.setSecret(repositoryToken);
-    const repositoryClient = github.getOctokit(repositoryToken);
+
+    const { owner, repo } = github.context.repo;
     const alertsClient = github.getOctokit(alertsToken);
-    const candidate = await resolveCandidate(
-      repositoryClient,
-      owner,
-      repo,
-      github.context.eventName,
-      github.context.payload as Record<string, unknown>,
-    );
-    const response = await alertsClient.paginate(alertsClient.rest.dependabot.listAlertsForRepo, {
+    const alerts = await alertsClient.paginate(alertsClient.rest.dependabot.listAlertsForRepo, {
       owner,
       repo,
       state: 'open',
       per_page: 100,
     });
-    const parsedAlerts = parseAlerts(response);
-    const reader = new RepositoryReader(repositoryClient, owner, repo);
-    const result = await evaluateGate({
-      alerts: parsedAlerts.critical,
-      reported: parsedAlerts.reported,
-      candidate,
-      now: new Date(),
-      slaHours,
-      acceptancePath,
-      readFile: (sha, path) => reader.read(sha, path),
-    });
+    const manifests = overdueCriticalManifests(alerts, new Date(), slaHours);
 
-    await writeSummary(result, parsedAlerts.critical, slaHours);
-    core.setOutput('base-blocked-count', result.baseBlocked.length);
-    core.setOutput('candidate-blocked-count', result.candidateBlocked.length);
-
-    for (const acceptance of result.staleAcceptances) {
-      core.warning(`Acceptance for alert #${acceptance.alert} does not match an open alert and should be removed.`);
-    }
-    for (const acceptance of result.expiredAcceptances) {
-      core.warning(`Acceptance for alert #${acceptance.alert} has expired and no longer applies.`);
-    }
-
-    if (!passes(result)) {
-      for (const alert of result.candidateBlocked) {
-        core.error(finding(alert, result.unverified[alert.number]));
-      }
-      core.setFailed(
-        `${result.candidateBlocked.length} overdue Critical alert(s) remain. `
-        + 'This change must fix or receive reviewed acceptance for at least one blocking alert.',
-      );
+    if (manifests.size === 0) {
+      await report(PASS_MESSAGE);
       return;
     }
 
-    if (result.baseBlocked.length > 0) {
-      core.info(
-        `The blocking Critical alert count falls from ${result.baseBlocked.length} `
-        + `to ${result.candidateBlocked.length}. The gate passes.`,
-      );
-    } else {
-      core.info('No overdue unaccepted Critical alerts. The gate passes.');
+    const event = pullRequestEvent(github.context.payload as JsonObject);
+    const repositoryClient = github.getOctokit(repositoryToken);
+    const evidence = await readPullRequestEvidence(
+      repositoryClient,
+      owner,
+      repo,
+      event.number,
+      event.headSha,
+    );
+
+    if (decideGate(manifests, evidence) === 'pass') {
+      await report(PASS_MESSAGE);
+      return;
     }
-  } catch (error) {
-    core.setFailed(failureMessage(error));
+
+    await report(BLOCK_MESSAGE);
+    core.setFailed(BLOCK_MESSAGE);
+  } catch {
+    core.setFailed(ERROR_MESSAGE);
   }
 }
 
-async function writeSummary(result: GateResult, alerts: Alert[], slaHours: number): Promise<void> {
-  const critical = alerts.filter((alert) => alert.severity === 'critical');
-  core.summary
+async function report(message: string): Promise<void> {
+  core.info(message);
+  await core.summary
     .addHeading('Dependabot Critical gate')
-    .addList([
-      `Critical SLA: ${slaHours} hours`,
-      `Open Critical: ${critical.length}`,
-      `Blocking before this change: ${result.baseBlocked.length}`,
-      `Blocking after this change: ${result.candidateBlocked.length}`,
-      `Fixed by this change: ${result.fixed.length}`,
-      `Covered by reviewed acceptance: ${result.accepted.length}`,
-      `Open High: ${result.reported.high}; open Medium: ${result.reported.medium}; open Low: ${result.reported.low} (report only)`,
-      `Stale acceptances: ${result.staleAcceptances.length}; expired acceptances: ${result.expiredAcceptances.length}`,
-    ]);
-
-  if (result.candidateBlocked.length > 0) {
-    core.summary.addHeading('Alerts that remain', 3).addTable([
-      [
-        { data: 'Alert', header: true },
-        { data: 'Package', header: true },
-        { data: 'Manifest', header: true },
-        { data: 'Result', header: true },
-      ],
-      ...result.candidateBlocked.map((alert) => [
-        `[#${alert.number}](${alert.htmlUrl})`,
-        `\`${alert.package}\``,
-        `\`${alert.manifest}\``,
-        result.unverified[alert.number] ?? 'The candidate still has a vulnerable version.',
-      ]),
-    ]);
-  }
-
-  core.summary.addRaw(
-    passes(result)
-      ? '\nThis change reduces the block or leaves no overdue Critical alerts.\n'
-      : '\nThis change does not reduce the overdue Critical alert count.\n',
-  );
-  await core.summary.write();
+    .addRaw(`${message}\n`)
+    .write();
 }
 
-function finding(alert: Alert, reason?: string): string {
-  return `Dependabot alert #${alert.number} (${alert.ghsa}) for ${alert.package} remains blocking. `
-    + (reason ?? 'The candidate merge result still contains a vulnerable version.');
+function pullRequestEvent(payload: JsonObject): { number: number; headSha: string } {
+  const pull = object(payload.pull_request);
+  const head = object(pull.head);
+
+  return {
+    number: positiveInteger(payload.number),
+    headSha: requiredString(head.sha),
+  };
 }
 
-function positiveInteger(value: string, field: string): number {
-  if (!/^\d+$/.test(value) || Number(value) <= 0 || !Number.isSafeInteger(Number(value))) {
-    throw new Error(`${field} must be a positive integer.`);
+function object(value: unknown): JsonObject {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('The pull request event is incomplete.');
   }
-  return Number(value);
+
+  return value as JsonObject;
 }
 
-function failureMessage(error: unknown): string {
-  const status = typeof error === 'object' && error !== null && 'status' in error
-    ? Number(error.status)
-    : null;
-
-  if (status === 403 || status === 404) {
-    return `GitHub denied required repository data (HTTP ${status}). Confirm that Dependabot alerts are enabled, `
-      + 'the GitHub App covers this repository, and both organization secrets are available.';
-  }
-  if (status === 409 || status === 422) {
-    return `GitHub could not provide a stable candidate merge result (HTTP ${status}). Update the branch and re-run the gate.`;
-  }
-  if (status === 429) {
-    return 'GitHub rate-limited the gate. Re-run it after the rate limit resets.';
-  }
-  if (status !== null && status >= 500) {
-    return `GitHub returned a server error (HTTP ${status}). Re-run the gate.`;
+function requiredString(value: unknown): string {
+  if (typeof value !== 'string' || value.trim() === '') {
+    throw new Error('The pull request event is incomplete.');
   }
 
-  return error instanceof Error ? error.message : String(error);
+  return value;
+}
+
+function positiveInteger(value: unknown): number {
+  const number = typeof value === 'string' && /^\d+$/.test(value) ? Number(value) : value;
+
+  if (!Number.isSafeInteger(number) || Number(number) <= 0) {
+    throw new Error('The gate has an invalid positive integer.');
+  }
+
+  return Number(number);
 }
 
 void run();

@@ -1,155 +1,173 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { RepositoryReader, resolveCandidate } from '../src/github.js';
+import { readPullRequestEvidence } from '../src/github.js';
 
-test('reads a nested regular blob without checking out the candidate tree', async () => {
-  const octokit = {
-    rest: {
-      git: {
-        getCommit: async () => ({ data: { tree: { sha: 'root' } } }),
-        getTree: async ({ tree_sha }: { tree_sha: string }) => ({
-          data: {
-            tree: tree_sha === 'root'
-              ? [{ path: 'nested', type: 'tree', sha: 'directory', mode: '040000' }]
-              : [{ path: 'package-lock.json', type: 'blob', sha: 'blob', mode: '100644' }],
-          },
-        }),
-        getBlob: async () => ({ data: { encoding: 'base64', content: Buffer.from('safe data').toString('base64') } }),
-      },
-    },
-  };
-  const reader = new RepositoryReader(octokit as never, 'acme', 'repo');
-
-  assert.equal(await reader.read('merge', 'nested/package-lock.json'), 'safe data');
-  assert.equal(await reader.read('merge', 'missing.lock'), null);
-  await assert.rejects(() => reader.read('merge', '../secret'), /Unsafe repository path/);
-});
-
-test('rejects symbolic links', async () => {
-  const octokit = {
-    rest: {
-      git: {
-        getCommit: async () => ({ data: { tree: { sha: 'root' } } }),
-        getTree: async () => ({ data: { tree: [{ path: 'package-lock.json', type: 'blob', sha: 'blob', mode: '120000' }] } }),
-      },
-    },
-  };
-  const reader = new RepositoryReader(octokit as never, 'acme', 'repo');
-  await assert.rejects(() => reader.read('merge', 'package-lock.json'), /symbolic link/);
-});
-
-test('rejects an oversized blob', async () => {
-  const octokit = {
-    rest: {
-      git: {
-        getCommit: async () => ({ data: { tree: { sha: 'root' } } }),
-        getTree: async () => ({ data: { tree: [{ path: 'package-lock.json', type: 'blob', sha: 'blob', mode: '100644' }] } }),
-        getBlob: async () => ({
-          data: { encoding: 'base64', content: Buffer.alloc(10 * 1024 * 1024 + 1).toString('base64') },
-        }),
-      },
-    },
-  };
-  const reader = new RepositoryReader(octokit as never, 'acme', 'repo');
-  await assert.rejects(() => reader.read('merge', 'package-lock.json'), /larger than the 10 MiB/);
-});
-
-test('rejects a truncated repository tree', async () => {
-  const octokit = {
-    rest: {
-      git: {
-        getCommit: async () => ({ data: { tree: { sha: 'root' } } }),
-        getTree: async () => ({ data: { tree: [], truncated: true } }),
-      },
-    },
-  };
-  const reader = new RepositoryReader(octokit as never, 'acme', 'repo');
-
-  await assert.rejects(() => reader.read('merge', 'package-lock.json'), /truncated.*lookup is incomplete/);
-});
-
-test('uses the live base with GitHub synthetic merge result and rejects a stale head', async () => {
-  const pull = {
-    data: {
-      head: { sha: 'head' },
-      base: { sha: 'base' },
-      mergeable: true,
-      merge_commit_sha: 'merge',
-    },
-  };
-  const octokit = { rest: { pulls: { get: async () => pull } } };
-  const payload = {
-    number: 22,
-    pull_request: { head: { sha: 'head' }, base: { sha: 'base' } },
-  };
-
-  assert.deepEqual(
-    await resolveCandidate(octokit as never, 'acme', 'repo', 'pull_request_target', payload),
-    { baseSha: 'base', headSha: 'head', candidateSha: 'merge', pullRequests: new Set([22]) },
+test('accepts a complete GitHub-verified Dependabot pull request', async () => {
+  const evidence = await readPullRequestEvidence(
+    client(),
+    'acme',
+    'example',
+    42,
+    'head-sha',
   );
 
-  pull.data.base.sha = 'current-base';
-  pull.data.merge_commit_sha = 'current-merge';
-  assert.deepEqual(
-    await resolveCandidate(octokit as never, 'acme', 'repo', 'pull_request_target', payload),
-    { baseSha: 'current-base', headSha: 'head', candidateSha: 'current-merge', pullRequests: new Set([22]) },
-  );
+  assert.equal(evidence.isVerifiedDependabot, true);
+  assert.deepEqual(evidence.changedPaths, new Set(['package.json', 'package-lock.json']));
+});
 
-  pull.data.head.sha = 'new-head';
+test('rejects a pull request that is not authored by Dependabot', async () => {
+  const cases = [
+    (pull: ReturnType<typeof validPull>) => { pull.user.id = 1; },
+    (pull: ReturnType<typeof validPull>) => { pull.user.login = 'another-user'; },
+    (pull: ReturnType<typeof validPull>) => { pull.user.type = 'User'; },
+  ];
+
+  for (const mutate of cases) {
+    const pull = validPull();
+    mutate(pull);
+    const evidence = await readPullRequestEvidence(client({ pull }), 'acme', 'example', 42, 'head-sha');
+
+    assert.deepEqual(evidence, { isVerifiedDependabot: false, changedPaths: new Set() });
+  }
+});
+
+test('rejects a Dependabot branch outside the target repository', async () => {
+  const pull = validPull();
+  pull.head.repo.full_name = 'another/example';
+
+  const evidence = await readPullRequestEvidence(client({ pull }), 'acme', 'example', 42, 'head-sha');
+
+  assert.equal(evidence.isVerifiedDependabot, false);
+});
+
+test('requires every commit to have the verified Dependabot identity', async () => {
+  const cases = [
+    (commit: ReturnType<typeof validCommit>) => { commit.author.id = 1; },
+    (commit: ReturnType<typeof validCommit>) => { commit.author.login = 'another-user'; },
+    (commit: ReturnType<typeof validCommit>) => { commit.committer.id = 1; },
+    (commit: ReturnType<typeof validCommit>) => { commit.committer.login = 'another-user'; },
+    (commit: ReturnType<typeof validCommit>) => { commit.commit.verification.verified = false; },
+    (commit: ReturnType<typeof validCommit>) => { commit.commit.verification.reason = 'unsigned'; },
+  ];
+
+  for (const mutate of cases) {
+    const pull = validPull();
+    pull.commits = 2;
+    const changedCommit = validCommit();
+    mutate(changedCommit);
+    const evidence = await readPullRequestEvidence(
+      client({ pull, commits: [validCommit(), changedCommit] }),
+      'acme',
+      'example',
+      42,
+      'head-sha',
+    );
+
+    assert.equal(evidence.isVerifiedDependabot, false);
+  }
+});
+
+test('fails closed when the event head is stale', async () => {
   await assert.rejects(
-    () => resolveCandidate(octokit as never, 'acme', 'repo', 'pull_request_target', payload),
+    () => readPullRequestEvidence(client(), 'acme', 'example', 42, 'old-head'),
     /head changed/,
   );
 });
 
-test('fails closed for conflicts and an unsettled merge result', async () => {
-  const payload = {
-    number: 22,
-    pull_request: { head: { sha: 'head' }, base: { sha: 'base' } },
-  };
-  const pull = {
-    data: { head: { sha: 'head' }, base: { sha: 'base' }, mergeable: false, merge_commit_sha: null },
-  };
-  const octokit = { rest: { pulls: { get: async () => pull } } };
-
+test('fails closed for incomplete commit and file pagination', async () => {
+  const twoCommits = validPull();
+  twoCommits.commits = 2;
   await assert.rejects(
-    () => resolveCandidate(octokit as never, 'acme', 'repo', 'pull_request_target', payload, async () => undefined),
-    /conflicts/,
+    () => readPullRequestEvidence(client({ pull: twoCommits }), 'acme', 'example', 42, 'head-sha'),
+    /commit list is incomplete/,
   );
 
-  pull.data.mergeable = null as unknown as false;
+  const threeFiles = validPull();
+  threeFiles.changed_files = 3;
   await assert.rejects(
-    () => resolveCandidate(octokit as never, 'acme', 'repo', 'pull_request_target', payload, async () => undefined),
-    /stable pull request merge result/,
+    () => readPullRequestEvidence(client({ pull: threeFiles }), 'acme', 'example', 42, 'head-sha'),
+    /file list is incomplete/,
   );
 });
 
-test('propagates GitHub API errors instead of passing', async () => {
-  const octokit = {
-    rest: { git: { getCommit: async () => { throw Object.assign(new Error('denied'), { status: 403 }); } } },
-  };
-  const reader = new RepositoryReader(octokit as never, 'acme', 'repo');
-  await assert.rejects(() => reader.read('merge', 'package-lock.json'), /denied/);
+test('fails closed when GitHub cannot return every commit or file', async () => {
+  const tooManyCommits = validPull();
+  tooManyCommits.commits = 251;
+  await assert.rejects(
+    () => readPullRequestEvidence(client({ pull: tooManyCommits }), 'acme', 'example', 42, 'head-sha'),
+    /commit list exceeds/,
+  );
+
+  const tooManyFiles = validPull();
+  tooManyFiles.changed_files = 3_001;
+  await assert.rejects(
+    () => readPullRequestEvidence(client({ pull: tooManyFiles }), 'acme', 'example', 42, 'head-sha'),
+    /file list exceeds/,
+  );
 });
 
-test('uses the merge-group SHA and finds its pull requests', async () => {
-  const octokit = {
+test('fails closed for an unsafe changed path', async () => {
+  await assert.rejects(
+    () => readPullRequestEvidence(
+      client({ files: [{ filename: '../package-lock.json' }, { filename: 'package.json' }] }),
+      'acme',
+      'example',
+      42,
+      'head-sha',
+    ),
+    /changed file path is unsafe/,
+  );
+});
+
+test('propagates GitHub API failures', async () => {
+  await assert.rejects(
+    () => readPullRequestEvidence(client({ getError: new Error('denied') }), 'acme', 'example', 42, 'head-sha'),
+    /denied/,
+  );
+});
+
+function validPull() {
+  return {
+    user: { id: 49_699_333, login: 'dependabot[bot]', type: 'Bot' },
+    head: { sha: 'head-sha', repo: { full_name: 'acme/example' } },
+    commits: 1,
+    changed_files: 2,
+  };
+}
+
+function validCommit() {
+  return {
+    author: { id: 49_699_333, login: 'dependabot[bot]' },
+    committer: { id: 19_864_447, login: 'web-flow' },
+    commit: { verification: { verified: true, reason: 'valid' } },
+  };
+}
+
+function client(options: {
+  pull?: ReturnType<typeof validPull>;
+  commits?: ReturnType<typeof validCommit>[];
+  files?: { filename: string }[];
+  getError?: Error;
+} = {}) {
+  const listCommits = () => undefined;
+  const listFiles = () => undefined;
+  const commits = options.commits ?? [validCommit()];
+  const files = options.files ?? [{ filename: 'package.json' }, { filename: 'package-lock.json' }];
+
+  return {
     rest: {
-      repos: {
-        compareCommitsWithBasehead: async () => ({
-          data: { total_commits: 2, commits: [{ sha: 'commit-1' }, { sha: 'commit-2' }] },
-        }),
-        listPullRequestsAssociatedWithCommit: () => undefined,
+      pulls: {
+        get: async () => {
+          if (options.getError !== undefined) {
+            throw options.getError;
+          }
+
+          return { data: options.pull ?? validPull() };
+        },
+        listCommits,
+        listFiles,
       },
     },
-    paginate: async (_endpoint: unknown, input: { commit_sha: string }) => (
-      input.commit_sha === 'commit-1' ? [{ number: 21 }] : [{ number: 22 }]
-    ),
-  };
-  const result = await resolveCandidate(octokit as never, 'acme', 'repo', 'merge_group', {
-    merge_group: { base_sha: 'base', head_sha: 'group', head_ref: 'refs/heads/gh-readonly-queue/main/pr-23-abcd' },
-  });
-
-  assert.equal(result.candidateSha, 'group');
-  assert.deepEqual(result.pullRequests, new Set([21, 22, 23]));
-});
+    paginate: async (endpoint: unknown) => endpoint === listCommits ? commits : files,
+  } as never;
+}

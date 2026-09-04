@@ -1,5 +1,5 @@
 name: Dependabot Critical Gate
-description: Blocks merges that do not reduce overdue Critical Dependabot alerts.
+description: Blocks merges while a Critical Dependabot alert is past its SLA.
 
 inputs:
   alerts-token:
@@ -11,15 +11,6 @@ inputs:
   sla-hours:
     description: Grace period before a Critical alert blocks merges.
     default: '168'
-  acceptance-file:
-    description: Repository path for reviewed alert acceptances.
-    default: .github/security/dependabot-accepted.yml
-
-outputs:
-  base-blocked-count:
-    description: Number of overdue, unaccepted Critical alerts on the base branch.
-  candidate-blocked-count:
-    description: Number of overdue, unaccepted Critical alerts after the candidate merge.
 
 runs:
   using: node24
