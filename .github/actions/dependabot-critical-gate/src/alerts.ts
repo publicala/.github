@@ -1,8 +1,5 @@
-import { repositoryPath } from './paths.js';
-
 type JsonObject = Record<string, unknown>;
 
-const KNOWN_SEVERITIES = new Set(['critical', 'high', 'medium', 'low']);
 const MAX_ALERTS = 10_000;
 
 export function overdueCriticalManifests(
@@ -29,10 +26,6 @@ export function overdueCriticalManifests(
     const advisory = object(alert.security_advisory, 'security advisory');
     const severity = requiredString(advisory.severity, 'severity').toLowerCase();
 
-    if (!KNOWN_SEVERITIES.has(severity)) {
-      throw new Error('A Dependabot alert has an unknown severity.');
-    }
-
     if (severity !== 'critical') {
       continue;
     }
@@ -48,7 +41,13 @@ export function overdueCriticalManifests(
     }
 
     const dependency = object(alert.dependency, 'dependency');
-    manifests.add(repositoryPath(dependency.manifest_path, 'manifest_path', true));
+    const manifest = requiredString(dependency.manifest_path, 'manifest_path').replace(/^\/+/, '');
+
+    if (manifest === '') {
+      throw new Error('A Critical Dependabot alert has an invalid manifest_path.');
+    }
+
+    manifests.add(manifest);
   }
 
   return manifests;

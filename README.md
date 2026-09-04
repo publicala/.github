@@ -24,7 +24,7 @@ Pull request starts
 
 The repair exception requires the Dependabot bot identity on the pull request and every commit, GitHub's verified `web-flow` signature on every commit, a branch in the target repository, and a changed file that matches an overdue alert's manifest.
 
-The action reads GitHub API responses only. It does not read file contents, install dependencies, or execute pull request code. Incomplete API data and unexpected alert data fail closed.
+The action reads GitHub API responses only. It does not read file contents, install dependencies, or execute pull request code. Incomplete Critical alert data and incomplete pull request data fail closed.
 
 The action reports only a generic pass, block, or error message. Alert identifiers, packages, manifests, versions, and dispositions do not enter public workflow logs.
 
@@ -33,3 +33,5 @@ The action reports only a generic pass, block, or error message. Alert identifie
 GitHub requires a public source for a required workflow that covers repositories of every visibility.
 
 The same visibility rule governs default community health files: GitHub applies them only from a public `.github` repository, and issue and pull request templates in particular are never inherited from an internal one. Making this repository private or internal would silently void the default template for every repository that relies on it.
+
+A detection pattern is not a secret: publishing the token *format* (e.g. the `pla_data_` prefix) leaks nothing, exactly as Stripe publishes `sk_live_`. Security lives in token values, never in the obscurity of their shape.

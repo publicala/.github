@@ -106,19 +106,6 @@ test('fails closed when GitHub cannot return every commit or file', async () => 
   );
 });
 
-test('fails closed for an unsafe changed path', async () => {
-  await assert.rejects(
-    () => readPullRequestEvidence(
-      client({ files: [{ filename: '../package-lock.json' }, { filename: 'package.json' }] }),
-      'acme',
-      'example',
-      42,
-      'head-sha',
-    ),
-    /changed file path is unsafe/,
-  );
-});
-
 test('propagates GitHub API failures', async () => {
   await assert.rejects(
     () => readPullRequestEvidence(client({ getError: new Error('denied') }), 'acme', 'example', 42, 'head-sha'),

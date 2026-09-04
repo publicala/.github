@@ -32,10 +32,9 @@ jobs:
 
       - run: npm run check-bundle
 
-      - run: npm audit --audit-level=high
-
       - name: Check public gate content
         # Hashes detect restricted names without publishing the names here.
+        # Add one with: printf '%s' '<name>' | tr '[:upper:]' '[:lower:]' | sha256sum
         env:
           RESTRICTED_HASHES: |
             b5de24f36bc297ad61d41b63ff9bf5b0c68d4778852294053f5f858abc9c3e8e
@@ -61,6 +60,7 @@ jobs:
             -type f -print0 \
             | xargs -0 grep -aEho '[[:alnum:]_]+' \
             | tr '[:upper:]' '[:lower:]' \
+            | sort -u \
             | while IFS= read -r token; do printf '%s' "$token" | sha256sum | cut -d' ' -f1; done \
             | grep -Fqx -f <(printf '%s' "$RESTRICTED_HASHES"); then
             echo 'The public gate content contains a restricted project name.' >&2

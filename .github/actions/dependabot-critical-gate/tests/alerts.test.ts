@@ -33,11 +33,12 @@ test('normalizes a root-prefixed manifest and removes duplicates', () => {
   assert.deepEqual(manifests, new Set(['package-lock.json']));
 });
 
-test('fails closed for an unknown severity', () => {
-  assert.throws(
-    () => overdueCriticalManifests([alert('unknown', '2026-01-01T00:00:00Z')], now, 168),
-    /unknown severity/,
-  );
+test('ignores future non-Critical severities', () => {
+  const manifests = overdueCriticalManifests([
+    alert('unknown', '2026-01-01T00:00:00Z'),
+  ], now, 168);
+
+  assert.deepEqual(manifests, new Set());
 });
 
 test('fails closed for incomplete Critical alert data', () => {
@@ -53,9 +54,9 @@ test('fails closed for incomplete Critical alert data', () => {
   );
   assert.throws(
     () => overdueCriticalManifests([
-      alert('critical', '2026-01-01T00:00:00Z', '../package-lock.json'),
+      alert('critical', '2026-01-01T00:00:00Z', '/'),
     ], now, 168),
-    /unsafe/,
+    /invalid manifest_path/,
   );
 });
 

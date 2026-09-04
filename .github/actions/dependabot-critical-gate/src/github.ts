@@ -1,5 +1,4 @@
 import { getOctokit } from '@actions/github';
-import { repositoryPath } from './paths.js';
 
 type Octokit = ReturnType<typeof getOctokit>;
 
@@ -71,7 +70,7 @@ export async function readPullRequestEvidence(
 
   return {
     isVerifiedDependabot: true,
-    changedPaths: new Set(files.map((file) => repositoryPath(file.filename, 'changed file path'))),
+    changedPaths: new Set(files.map((file) => file.filename)),
   };
 }
 

@@ -20052,6 +20052,9 @@ function setFailed(message) {
   process.exitCode = ExitCode.Failure;
   error(message);
 }
+function debug(message) {
+  issueCommand("debug", {}, message);
+}
 function error(message, properties = {}) {
   issueCommand("error", toCommandProperties(properties), message instanceof Error ? message.toString() : message);
 }
@@ -24144,26 +24147,7 @@ function getOctokit(token, options, ...additionalPlugins) {
   return new GitHubWithPlugins(getOctokitOptions(token, options));
 }
 
-// .github/actions/dependabot-critical-gate/src/paths.ts
-function repositoryPath(value, field, allowLeadingSlash = false) {
-  if (typeof value !== "string" || value.trim() === "") {
-    throw new Error(`The ${field} is invalid.`);
-  }
-  if (!allowLeadingSlash && value.startsWith("/")) {
-    throw new Error(`The ${field} is unsafe.`);
-  }
-  const path = allowLeadingSlash ? value.replace(/^\/+/, "") : value;
-  if (path.length === 0 || path.length > 4096 || path.includes("\\") || /[\u0000-\u001f\u007f]/.test(path)) {
-    throw new Error(`The ${field} is unsafe.`);
-  }
-  if (path.split("/").some((part) => part === "" || part === "." || part === "..")) {
-    throw new Error(`The ${field} is unsafe.`);
-  }
-  return path;
-}
-
 // .github/actions/dependabot-critical-gate/src/alerts.ts
-var KNOWN_SEVERITIES = /* @__PURE__ */ new Set(["critical", "high", "medium", "low"]);
 var MAX_ALERTS = 1e4;
 function overdueCriticalManifests(input, now, slaHours) {
   if (!Array.isArray(input)) {
@@ -24180,9 +24164,6 @@ function overdueCriticalManifests(input, now, slaHours) {
     const alert = object(value, "alert");
     const advisory = object(alert.security_advisory, "security advisory");
     const severity = requiredString(advisory.severity, "severity").toLowerCase();
-    if (!KNOWN_SEVERITIES.has(severity)) {
-      throw new Error("A Dependabot alert has an unknown severity.");
-    }
     if (severity !== "critical") {
       continue;
     }
@@ -24195,7 +24176,11 @@ function overdueCriticalManifests(input, now, slaHours) {
       continue;
     }
     const dependency = object(alert.dependency, "dependency");
-    manifests.add(repositoryPath(dependency.manifest_path, "manifest_path", true));
+    const manifest = requiredString(dependency.manifest_path, "manifest_path").replace(/^\/+/, "");
+    if (manifest === "") {
+      throw new Error("A Critical Dependabot alert has an invalid manifest_path.");
+    }
+    manifests.add(manifest);
   }
   return manifests;
 }
@@ -24270,7 +24255,7 @@ async function readPullRequestEvidence(octokit, owner, repo, pullNumber, expecte
   }
   return {
     isVerifiedDependabot: true,
-    changedPaths: new Set(files.map((file) => repositoryPath(file.filename, "changed file path")))
+    changedPaths: new Set(files.map((file) => file.filename))
   };
 }
 function isDependabotPullRequest(pull, owner, repo) {
@@ -24337,7 +24322,8 @@ async function run() {
     }
     await report(BLOCK_MESSAGE);
     setFailed(BLOCK_MESSAGE);
-  } catch {
+  } catch (error2) {
+    debug(error2 instanceof Error ? error2.message : String(error2));
     setFailed(ERROR_MESSAGE);
   }
 }

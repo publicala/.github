@@ -54,7 +54,8 @@ async function run(): Promise<void> {
 
     await report(BLOCK_MESSAGE);
     core.setFailed(BLOCK_MESSAGE);
-  } catch {
+  } catch (error) {
+    core.debug(error instanceof Error ? error.message : String(error));
     core.setFailed(ERROR_MESSAGE);
   }
 }
