@@ -9,11 +9,11 @@
 /CODEOWNERS                         @publicala/secret-scan-owners
 /.github/workflows/secret-scan.yml  @publicala/secret-scan-owners
 
-# The repository ruleset requires approval from both teams for the
-# Dependabot gate. CODEOWNERS makes the ownership visible in review.
-/.github/actions/dependabot-critical-gate/      @publicala/ci-owners @publicala/vuln-review-owners
-/.github/workflows/dependabot-critical-gate.yml @publicala/ci-owners @publicala/vuln-review-owners
-/.github/workflows/ci.yml                       @publicala/ci-owners @publicala/vuln-review-owners
-/package.json                                  @publicala/ci-owners @publicala/vuln-review-owners
-/package-lock.json                             @publicala/ci-owners @publicala/vuln-review-owners
-/tsconfig.json                                 @publicala/ci-owners @publicala/vuln-review-owners
+# The repository ruleset requires ci-owners approval for the Dependabot gate.
+# CODEOWNERS makes the ownership visible in review.
+/.github/actions/dependabot-critical-gate/      @publicala/ci-owners
+/.github/workflows/dependabot-critical-gate.yml @publicala/ci-owners
+/.github/workflows/ci.yml                       @publicala/ci-owners
+/package.json                                   @publicala/ci-owners
+/package-lock.json                              @publicala/ci-owners
+/tsconfig.json                                  @publicala/ci-owners
