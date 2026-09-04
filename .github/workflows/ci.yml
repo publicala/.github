@@ -1,0 +1,92 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+env:
+  ACTIONLINT_VERSION: 1.7.12
+  ACTIONLINT_SHA256: 8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8
+
+jobs:
+  action:
+    name: Test gate action
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-node@395ad3262231945c25e8478fd5baf05154b1d79f # v6.1.0
+        with:
+          node-version: 24
+          cache: npm
+
+      - run: npm ci
+
+      - run: npm run typecheck
+
+      - run: npm test
+
+      - run: npm run check-bundle
+
+      - name: Check public gate content
+        # Hashes detect restricted names without publishing the names here.
+        # Add one with: printf '%s' '<name>' | tr '[:upper:]' '[:lower:]' | sha256sum
+        env:
+          RESTRICTED_HASHES: |
+            b5de24f36bc297ad61d41b63ff9bf5b0c68d4778852294053f5f858abc9c3e8e
+            10d1e8a7d0cea1f507dce22e8ba61ed205a5a45ee38e295f3d65bad861fb2068
+            a4c6130f3b5f00c2e460d30a243b35cb0b70888fa9b3b49dfb69a5ae5a176d8e
+            823e291431cff346861d254b6919a7f81aae326620bcab48baf225b77521cfc8
+            22fc9d5b86b2d0a93ba855088e5386ea262bbe94b583c501e02bc7482caf7b55
+            b7ac7bd4e901269fda64157001d6b97d4f884555acac838e082b9d1c765c780d
+            2b415c2b8c4f04353571dffa599432471021aa14dfbf2fa924bc72e48741e9d8
+            5362c2c3da525cda1246cf76a5d47814cbafac918379cfe3aafcbc9e51e8abf8
+            f9e76c8b7abcd097c4698165324253cd85ea3331e76cf2ae815aa7d6e34b549d
+            b03d67b0032afaf679e34bc0bc5f3f785e564e65855d313eb4bc153a2203da68
+            a1a1e53e395ec2b325b5b7b98693366309c8a5a6c8d991b67daf98da4eec433c
+            ad59fc592ec9c1e542fb8c747673fe9f99e610c0505101a6960d48fb61f171ad
+            7c4b70e5e155c55c2ea08bad17b1199ea854179de53589cf04ba78c082d13e62
+        run: |
+          if find \
+            .github/actions/dependabot-critical-gate/src \
+            .github/actions/dependabot-critical-gate/tests \
+            .github/actions/dependabot-critical-gate/action.yml \
+            .github/workflows/dependabot-critical-gate.yml \
+            README.md \
+            -type f -print0 \
+            | xargs -0 grep -aEho '[[:alnum:]_]+' \
+            | tr '[:upper:]' '[:lower:]' \
+            | sort -u \
+            | while IFS= read -r token; do printf '%s' "$token" | sha256sum | cut -d' ' -f1; done \
+            | grep -Fqx -f <(printf '%s' "$RESTRICTED_HASHES"); then
+            echo 'The public gate content contains a restricted project name.' >&2
+            exit 1
+          fi
+
+      - name: Install actionlint
+        run: |
+          set -euo pipefail
+          archive="actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          curl -fsSL -o "${archive}" \
+            "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/${archive}"
+          echo "${ACTIONLINT_SHA256}  ${archive}" | sha256sum --check --strict
+          tar -xzf "${archive}" actionlint
+
+      - name: Lint workflows
+        # actionlint 1.7.12 does not know GitHub's $/ self-repository syntax.
+        run: ./actionlint -ignore 'specifying action "\$/.*" in invalid format because ref is missing' -color
+
+  ci-success:
+    name: ci-success
+    if: always()
+    needs: action
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require every CI job
+        env:
+          ACTION_RESULT: ${{ needs.action.result }}
+        run: test "$ACTION_RESULT" = success

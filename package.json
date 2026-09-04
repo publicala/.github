@@ -1,0 +1,25 @@
+{
+  "name": "@publicala/organization-workflows",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "esbuild .github/actions/dependabot-critical-gate/src/main.ts --bundle --platform=node --target=node24 --format=cjs --outfile=.github/actions/dependabot-critical-gate/dist/index.cjs --legal-comments=external",
+    "check-bundle": "npm run build && git diff --exit-code -- .github/actions/dependabot-critical-gate/dist",
+    "test": "node --import tsx --test .github/actions/dependabot-critical-gate/tests/**/*.test.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@actions/core": "3.0.1",
+    "@actions/github": "9.1.1"
+  },
+  "devDependencies": {
+    "@types/node": "24.13.3",
+    "esbuild": "0.28.2",
+    "tsx": "4.23.13",
+    "typescript": "7.0.2"
+  },
+  "engines": {
+    "node": ">=24"
+  }
+}
