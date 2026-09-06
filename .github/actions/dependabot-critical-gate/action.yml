@@ -1,0 +1,17 @@
+name: Dependabot Critical Gate
+description: Blocks merges while a Critical Dependabot alert is past its SLA.
+
+inputs:
+  alerts-token:
+    description: Repository-scoped GitHub App token with Dependabot alerts read access.
+    required: true
+  repository-token:
+    description: GITHUB_TOKEN with contents and pull request read access.
+    required: true
+  sla-hours:
+    description: Grace period before a Critical alert blocks merges.
+    default: '168'
+
+runs:
+  using: node24
+  main: dist/index.cjs
