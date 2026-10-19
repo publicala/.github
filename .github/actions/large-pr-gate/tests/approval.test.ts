@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { hasHumanApproval, type Review } from '../src/approval.js';
+import { approvalCandidates, type Review } from '../src/approval.js';
 
 const AUTHOR = 1;
 const HEAD = 'head-sha';
@@ -8,26 +8,22 @@ const HEAD = 'head-sha';
 function review(overrides: Partial<Review> = {}): Review {
   return {
     reviewerId: 2,
+    reviewerLogin: 'reviewer',
     reviewerType: 'User',
-    association: 'MEMBER',
     state: 'APPROVED',
     commitId: HEAD,
     ...overrides,
   };
 }
 
-test('accepts a member approval of the head commit', () => {
-  assert.equal(hasHumanApproval([review()], AUTHOR, HEAD), true);
-  assert.equal(hasHumanApproval([review({ association: 'OWNER' })], AUTHOR, HEAD), true);
-  assert.equal(hasHumanApproval([review({ association: 'COLLABORATOR' })], AUTHOR, HEAD), true);
+test('names a user who approved the head commit', () => {
+  assert.deepEqual(approvalCandidates([review()], AUTHOR, HEAD), ['reviewer']);
 });
 
-test('rejects approvals that are not an explicit human approval of the head', () => {
+test('skips reviews that are not a human approval of the head', () => {
   const cases: Partial<Review>[] = [
     { reviewerId: AUTHOR },
     { reviewerType: 'Bot' },
-    { association: 'CONTRIBUTOR' },
-    { association: 'NONE' },
     { commitId: 'older-sha' },
     { commitId: null },
     { state: 'COMMENTED' },
@@ -36,26 +32,27 @@ test('rejects approvals that are not an explicit human approval of the head', ()
   ];
 
   for (const overrides of cases) {
-    assert.equal(hasHumanApproval([review(overrides)], AUTHOR, HEAD), false, JSON.stringify(overrides));
+    assert.deepEqual(approvalCandidates([review(overrides)], AUTHOR, HEAD), [], JSON.stringify(overrides));
   }
 });
 
-test('rejects no reviews', () => {
-  assert.equal(hasHumanApproval([], AUTHOR, HEAD), false);
+test('names nobody without reviews', () => {
+  assert.deepEqual(approvalCandidates([], AUTHOR, HEAD), []);
 });
 
 test('a later change request replaces the approval', () => {
-  assert.equal(hasHumanApproval([review(), review({ state: 'CHANGES_REQUESTED' })], AUTHOR, HEAD), false);
+  assert.deepEqual(approvalCandidates([review(), review({ state: 'CHANGES_REQUESTED' })], AUTHOR, HEAD), []);
 });
 
 test('a later comment keeps the approval', () => {
-  assert.equal(hasHumanApproval([review(), review({ state: 'COMMENTED' })], AUTHOR, HEAD), true);
+  assert.deepEqual(approvalCandidates([review(), review({ state: 'COMMENTED' })], AUTHOR, HEAD), ['reviewer']);
 });
 
-test('one qualifying reviewer is enough', () => {
-  assert.equal(hasHumanApproval([
-    review({ reviewerId: 3, reviewerType: 'Bot' }),
-    review({ reviewerId: 4, state: 'CHANGES_REQUESTED' }),
-    review({ reviewerId: 5 }),
-  ], AUTHOR, HEAD), true);
+test('names every qualifying reviewer', () => {
+  assert.deepEqual(approvalCandidates([
+    review({ reviewerId: 3, reviewerLogin: 'bot', reviewerType: 'Bot' }),
+    review({ reviewerId: 4, reviewerLogin: 'skeptic', state: 'CHANGES_REQUESTED' }),
+    review({ reviewerId: 5, reviewerLogin: 'first' }),
+    review({ reviewerId: 6, reviewerLogin: 'second' }),
+  ], AUTHOR, HEAD), ['first', 'second']);
 });

@@ -24379,16 +24379,15 @@ function getOctokit(token, options, ...additionalPlugins) {
 }
 
 // .github/actions/large-pr-gate/src/approval.ts
-var WRITE_ASSOCIATIONS = /* @__PURE__ */ new Set(["OWNER", "MEMBER", "COLLABORATOR"]);
 var DECISIVE_STATES = /* @__PURE__ */ new Set(["APPROVED", "CHANGES_REQUESTED", "DISMISSED"]);
-function hasHumanApproval(reviews, authorId, headSha) {
+function approvalCandidates(reviews, authorId, headSha) {
   const latest = /* @__PURE__ */ new Map();
   for (const review of reviews) {
     if (DECISIVE_STATES.has(review.state)) {
       latest.set(review.reviewerId, review);
     }
   }
-  return [...latest.values()].some((review) => review.state === "APPROVED" && review.commitId === headSha && review.reviewerId !== authorId && review.reviewerType === "User" && WRITE_ASSOCIATIONS.has(review.association));
+  return [...latest.values()].filter((review) => review.state === "APPROVED" && review.commitId === headSha && review.reviewerId !== authorId && review.reviewerType === "User").map((review) => review.reviewerLogin);
 }
 
 // .github/actions/large-pr-gate/src/size.ts
@@ -24510,10 +24509,12 @@ async function evaluateGate(source, maxLines) {
   if (lines <= maxLines) {
     return { decision: "pass", lines };
   }
-  return {
-    decision: hasHumanApproval(await source.reviews(), pull.authorId, pull.headSha) ? "approved" : "block",
-    lines
-  };
+  for (const login of approvalCandidates(await source.reviews(), pull.authorId, pull.headSha)) {
+    if (await source.hasWriteAccess(login)) {
+      return { decision: "approved", lines };
+    }
+  }
+  return { decision: "block", lines };
 }
 
 // .github/actions/large-pr-gate/src/github.ts
@@ -24569,7 +24570,7 @@ function pullRequestSource(octokit, owner, repo, pullNumber, expectedHeadSha) {
         }
         return Buffer.from(data.content, "base64").toString("utf8");
       } catch (error2) {
-        if (typeof error2 === "object" && error2 !== null && "status" in error2 && error2.status === 404) {
+        if (isNotFound(error2)) {
           return "";
         }
         throw error2;
@@ -24584,13 +24585,28 @@ function pullRequestSource(octokit, owner, repo, pullNumber, expectedHeadSha) {
       });
       return reviews.flatMap((review) => review.user === null || review.user === void 0 ? [] : [{
         reviewerId: review.user.id,
+        reviewerLogin: review.user.login,
         reviewerType: review.user.type,
-        association: review.author_association,
         state: review.state,
         commitId: review.commit_id
       }]);
+    },
+    // Team, organization base, and custom role grants resolve to admin, write, read, or none.
+    async hasWriteAccess(login) {
+      try {
+        const { data } = await octokit.rest.repos.getCollaboratorPermissionLevel({ owner, repo, username: login });
+        return data.permission === "admin" || data.permission === "write";
+      } catch (error2) {
+        if (isNotFound(error2)) {
+          return false;
+        }
+        throw error2;
+      }
     }
   };
+}
+function isNotFound(error2) {
+  return typeof error2 === "object" && error2 !== null && "status" in error2 && error2.status === 404;
 }
 function positiveInteger(value, field) {
   if (!Number.isSafeInteger(value) || Number(value) <= 0) {

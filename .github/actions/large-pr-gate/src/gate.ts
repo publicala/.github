@@ -1,4 +1,4 @@
-import { hasHumanApproval, type Review } from './approval.js';
+import { approvalCandidates, type Review } from './approval.js';
 import { generatedPathMatcher, reviewableLines, type ChangedFile } from './size.js';
 
 export interface PullRequestFacts {
@@ -14,6 +14,7 @@ export interface PullRequestSource {
   files(): Promise<ChangedFile[] | undefined>;
   gitattributes(): Promise<string>;
   reviews(): Promise<Review[]>;
+  hasWriteAccess(login: string): Promise<boolean>;
 }
 
 export interface GateResult {
@@ -38,8 +39,11 @@ export async function evaluateGate(source: PullRequestSource, maxLines: number):
     return { decision: 'pass', lines };
   }
 
-  return {
-    decision: hasHumanApproval(await source.reviews(), pull.authorId, pull.headSha) ? 'approved' : 'block',
-    lines,
-  };
+  for (const login of approvalCandidates(await source.reviews(), pull.authorId, pull.headSha)) {
+    if (await source.hasWriteAccess(login)) {
+      return { decision: 'approved', lines };
+    }
+  }
+
+  return { decision: 'block', lines };
 }

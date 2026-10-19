@@ -6,8 +6,8 @@ import type { ChangedFile } from '../src/size.js';
 
 const APPROVAL: Review = {
   reviewerId: 2,
+  reviewerLogin: 'reviewer',
   reviewerType: 'User',
-  association: 'MEMBER',
   state: 'APPROVED',
   commitId: 'head-sha',
 };
@@ -18,6 +18,7 @@ function source(options: {
   files?: ChangedFile[] | undefined;
   gitattributes?: string;
   reviews?: Review[];
+  writers?: string[];
 }): PullRequestSource & { calls: string[] } {
   const calls: string[] = [];
 
@@ -38,6 +39,10 @@ function source(options: {
     async reviews() {
       calls.push('reviews');
       return options.reviews ?? [];
+    },
+    async hasWriteAccess(login) {
+      calls.push(`permission:${login}`);
+      return (options.writers ?? []).includes(login);
     },
   };
 }
@@ -77,6 +82,29 @@ test('passes a large pull request with a human approval of the head', async () =
     additions: 30_000,
     files: [{ filename: 'src/feature.ts', additions: 30_000, deletions: 0 }],
     reviews: [APPROVAL],
+    writers: ['reviewer'],
+  });
+
+  assert.deepEqual(await evaluateGate(pull, 20_000), { decision: 'approved', lines: 30_000 });
+});
+
+test('blocks when the approver lacks write access', async () => {
+  const pull = source({
+    additions: 30_000,
+    files: [{ filename: 'src/feature.ts', additions: 30_000, deletions: 0 }],
+    reviews: [APPROVAL],
+  });
+
+  assert.deepEqual(await evaluateGate(pull, 20_000), { decision: 'block', lines: 30_000 });
+  assert.deepEqual(pull.calls.at(-1), 'permission:reviewer');
+});
+
+test('passes when any approver has write access', async () => {
+  const pull = source({
+    additions: 30_000,
+    files: [{ filename: 'src/feature.ts', additions: 30_000, deletions: 0 }],
+    reviews: [APPROVAL, { ...APPROVAL, reviewerId: 3, reviewerLogin: 'maintainer' }],
+    writers: ['maintainer'],
   });
 
   assert.deepEqual(await evaluateGate(pull, 20_000), { decision: 'approved', lines: 30_000 });

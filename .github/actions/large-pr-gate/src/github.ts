@@ -74,7 +74,7 @@ export function pullRequestSource(
 
         return Buffer.from(data.content, 'base64').toString('utf8');
       } catch (error) {
-        if (typeof error === 'object' && error !== null && 'status' in error && error.status === 404) {
+        if (isNotFound(error)) {
           return '';
         }
 
@@ -94,13 +94,32 @@ export function pullRequestSource(
         ? []
         : [{
           reviewerId: review.user.id,
+          reviewerLogin: review.user.login,
           reviewerType: review.user.type,
-          association: review.author_association,
           state: review.state,
           commitId: review.commit_id,
         }]);
     },
+
+    // Team, organization base, and custom role grants resolve to admin, write, read, or none.
+    async hasWriteAccess(login) {
+      try {
+        const { data } = await octokit.rest.repos.getCollaboratorPermissionLevel({ owner, repo, username: login });
+
+        return data.permission === 'admin' || data.permission === 'write';
+      } catch (error) {
+        if (isNotFound(error)) {
+          return false;
+        }
+
+        throw error;
+      }
+    },
   };
+}
+
+function isNotFound(error: unknown): boolean {
+  return typeof error === 'object' && error !== null && 'status' in error && error.status === 404;
 }
 
 function positiveInteger(value: unknown, field: string): number {

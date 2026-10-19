@@ -20,6 +20,7 @@ function client(options: {
   files?: unknown[];
   reviews?: unknown[];
   content?: () => unknown;
+  permission?: (username: string) => unknown;
 } = {}): Client & { contentRefs: string[] } {
   const listFiles = Symbol('listFiles');
   const listReviews = Symbol('listReviews');
@@ -34,6 +35,9 @@ function client(options: {
         listReviews,
       },
       repos: {
+        getCollaboratorPermissionLevel: async ({ username }: { username: string }) => ({
+          data: options.permission?.(username) ?? { permission: 'write' },
+        }),
         getContent: async ({ ref }: { ref: string }) => {
           contentRefs.push(ref);
           return { data: options.content?.() ?? { type: 'file', content: Buffer.from('api/** linguist-generated').toString('base64') } };
@@ -105,11 +109,27 @@ test('treats a missing .gitattributes as empty and rethrows other errors', async
 
 test('maps reviews and skips deleted reviewers', async () => {
   const reviews = await pullRequestSource(client({ reviews: [
-    { user: { id: 2, type: 'User' }, author_association: 'MEMBER', state: 'APPROVED', commit_id: 'head-sha' },
-    { user: null, author_association: 'NONE', state: 'APPROVED', commit_id: 'head-sha' },
+    { user: { id: 2, login: 'reviewer', type: 'User' }, state: 'APPROVED', commit_id: 'head-sha' },
+    { user: null, state: 'APPROVED', commit_id: 'head-sha' },
   ] }), 'acme', 'example', 42, 'head-sha').reviews();
 
   assert.deepEqual(reviews, [
-    { reviewerId: 2, reviewerType: 'User', association: 'MEMBER', state: 'APPROVED', commitId: 'head-sha' },
+    { reviewerId: 2, reviewerLogin: 'reviewer', reviewerType: 'User', state: 'APPROVED', commitId: 'head-sha' },
   ]);
+});
+
+test('grants write access only to admin and write permission', async () => {
+  for (const [permission, expected] of [['admin', true], ['write', true], ['read', false], ['none', false]] as const) {
+    const source = pullRequestSource(client({ permission: () => ({ permission }) }), 'acme', 'example', 42, 'head-sha');
+
+    assert.equal(await source.hasWriteAccess('reviewer'), expected, permission);
+  }
+});
+
+test('treats an unknown reviewer as no access and rethrows other errors', async () => {
+  const missing = client({ permission: () => { throw Object.assign(new Error('Not Found'), { status: 404 }); } });
+  assert.equal(await pullRequestSource(missing, 'acme', 'example', 42, 'head-sha').hasWriteAccess('ghost'), false);
+
+  const forbidden = client({ permission: () => { throw Object.assign(new Error('Forbidden'), { status: 403 }); } });
+  await assert.rejects(pullRequestSource(forbidden, 'acme', 'example', 42, 'head-sha').hasWriteAccess('reviewer'), /Forbidden/);
 });

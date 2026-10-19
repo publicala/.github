@@ -47,9 +47,11 @@ Pull request starts
 
 Reviewable lines exclude lockfiles, minified assets, source maps, snapshots, and paths that the base commit's root `.gitattributes` marks `linguist-generated` or `linguist-vendored`. A `-linguist-generated` line counts a default exclusion again. The gate reads `.gitattributes` from the base commit, so a pull request cannot reclassify its own lines. Above GitHub's 3,000-file list limit, the gate counts every line.
 
-A review counts when its reviewer is a `User` with `OWNER`, `MEMBER`, or `COLLABORATOR` association, is not the pull request author, and approved the current head commit. A later change request or dismissal replaces the approval. A push after the approval needs a new approval.
+A review counts when its reviewer is a `User`, is not the pull request author, approved the current head commit, and has `admin` or `write` permission on the repository. The gate reads the permission from the collaborator permission endpoint, which resolves team, organization base, and custom role grants. Organization membership alone does not count. A later change request or dismissal replaces the approval. A push after the approval needs a new approval.
 
 Required workflows do not run on review events. After approving, re-run `Large PR approval gate` from the pull request's Checks tab.
+
+A passed gate stays passed when the approval is later dismissed or replaced by a change request, until the next push or re-run. Dismissing a review requires write access.
 
 The gate cannot tell a person from an agent that acts with a person's token. An approval through a personal token counts as that person's approval.
 
