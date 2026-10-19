@@ -13,5 +13,5 @@
     "target": "ES2024",
     "types": ["node"]
   },
-  "include": [".github/actions/dependabot-critical-gate/src/**/*.ts", ".github/actions/dependabot-critical-gate/tests/**/*.ts"]
+  "include": [".github/actions/*/src/**/*.ts", ".github/actions/*/tests/**/*.ts"]
 }

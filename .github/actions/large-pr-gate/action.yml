@@ -1,0 +1,14 @@
+name: Large PR Gate
+description: Blocks merging a pull request above the reviewable line limit until a human other than the author approves its head commit.
+
+inputs:
+  repository-token:
+    description: GITHUB_TOKEN with contents and pull request read access.
+    required: true
+  max-lines:
+    description: Reviewable changed lines (additions plus deletions) a pull request may carry without an approval.
+    default: '20000'
+
+runs:
+  using: node24
+  main: dist/index.cjs
