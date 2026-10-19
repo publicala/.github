@@ -4,9 +4,11 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "esbuild .github/actions/dependabot-critical-gate/src/main.ts --bundle --platform=node --target=node24 --format=cjs --outfile=.github/actions/dependabot-critical-gate/dist/index.cjs --legal-comments=external",
-    "check-bundle": "npm run build && git diff --exit-code -- .github/actions/dependabot-critical-gate/dist",
-    "test": "node --import tsx --test .github/actions/dependabot-critical-gate/tests/**/*.test.ts",
+    "build": "npm run build:dependabot-critical-gate && npm run build:large-pr-gate",
+    "build:dependabot-critical-gate": "esbuild .github/actions/dependabot-critical-gate/src/main.ts --bundle --platform=node --target=node24 --format=cjs --outfile=.github/actions/dependabot-critical-gate/dist/index.cjs --legal-comments=external",
+    "build:large-pr-gate": "esbuild .github/actions/large-pr-gate/src/main.ts --bundle --platform=node --target=node24 --format=cjs --outfile=.github/actions/large-pr-gate/dist/index.cjs --legal-comments=external",
+    "check-bundle": "npm run build && git diff --exit-code -- .github/actions/dependabot-critical-gate/dist .github/actions/large-pr-gate/dist",
+    "test": "node --import tsx --test '.github/actions/*/tests/**/*.test.ts'",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

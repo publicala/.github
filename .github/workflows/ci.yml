@@ -56,6 +56,10 @@ jobs:
             .github/actions/dependabot-critical-gate/tests \
             .github/actions/dependabot-critical-gate/action.yml \
             .github/workflows/dependabot-critical-gate.yml \
+            .github/actions/large-pr-gate/src \
+            .github/actions/large-pr-gate/tests \
+            .github/actions/large-pr-gate/action.yml \
+            .github/workflows/large-pr-gate.yml \
             README.md \
             -type f -print0 \
             | xargs -0 grep -aEho '[[:alnum:]_]+' \
