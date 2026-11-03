@@ -1,5 +1,8 @@
 import * as core from '@actions/core';
 import * as github from '@actions/github';
+import { githubClient } from '../../shared/src/client.js';
+import { debugFailureDetail, GateError, gateFailureMessage } from '../../shared/src/failure.js';
+import { requiredInput } from '../../shared/src/inputs.js';
 import { overdueCriticalManifests } from './alerts.js';
 import { decideGate } from './gate.js';
 import { readPullRequestEvidence } from './github.js';
@@ -8,22 +11,21 @@ type JsonObject = Record<string, unknown>;
 
 const PASS_MESSAGE = 'This repository has no blocking Dependabot condition.';
 const BLOCK_MESSAGE = 'Repository maintainers must review Dependabot alerts in the Security view.';
-const ERROR_MESSAGE = 'The gate could not complete. Repository maintainers must inspect this run.';
 
 async function run(): Promise<void> {
   try {
     if (github.context.eventName !== 'pull_request_target') {
-      throw new Error('The gate received an unsupported event.');
+      throw new GateError('The gate received an unsupported event.');
     }
 
-    const alertsToken = core.getInput('alerts-token', { required: true });
-    const repositoryToken = core.getInput('repository-token', { required: true });
-    const slaHours = positiveInteger(core.getInput('sla-hours', { required: true }));
+    const alertsToken = requiredInput('alerts-token');
+    const repositoryToken = requiredInput('repository-token');
+    const slaHours = positiveInteger(requiredInput('sla-hours'));
     core.setSecret(alertsToken);
     core.setSecret(repositoryToken);
 
     const { owner, repo } = github.context.repo;
-    const alertsClient = github.getOctokit(alertsToken);
+    const alertsClient = githubClient(alertsToken);
     const alerts = await alertsClient.paginate(alertsClient.rest.dependabot.listAlertsForRepo, {
       owner,
       repo,
@@ -38,7 +40,7 @@ async function run(): Promise<void> {
     }
 
     const event = pullRequestEvent(github.context.payload as JsonObject);
-    const repositoryClient = github.getOctokit(repositoryToken);
+    const repositoryClient = githubClient(repositoryToken);
     const evidence = await readPullRequestEvidence(
       repositoryClient,
       owner,
@@ -55,13 +57,19 @@ async function run(): Promise<void> {
     await report(BLOCK_MESSAGE);
     core.setFailed(BLOCK_MESSAGE);
   } catch (error) {
-    core.debug(error instanceof Error ? error.message : String(error));
-    core.setFailed(ERROR_MESSAGE);
+    core.debug(debugFailureDetail(error));
+    const message = gateFailureMessage(error);
+    core.setFailed(message);
+    await writeSummary(message).catch(() => undefined);
   }
 }
 
 async function report(message: string): Promise<void> {
   core.info(message);
+  await writeSummary(message);
+}
+
+async function writeSummary(message: string): Promise<void> {
   await core.summary
     .addHeading('Dependabot Critical gate')
     .addRaw(`${message}\n`)
@@ -80,7 +88,7 @@ function pullRequestEvent(payload: JsonObject): { number: number; headSha: strin
 
 function object(value: unknown): JsonObject {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) {
-    throw new Error('The pull request event is incomplete.');
+    throw new GateError('The pull request event is incomplete.');
   }
 
   return value as JsonObject;
@@ -88,7 +96,7 @@ function object(value: unknown): JsonObject {
 
 function requiredString(value: unknown): string {
   if (typeof value !== 'string' || value.trim() === '') {
-    throw new Error('The pull request event is incomplete.');
+    throw new GateError('The pull request event is incomplete.');
   }
 
   return value;
@@ -98,7 +106,7 @@ function positiveInteger(value: unknown): number {
   const number = typeof value === 'string' && /^\d+$/.test(value) ? Number(value) : value;
 
   if (!Number.isSafeInteger(number) || Number(number) <= 0) {
-    throw new Error('The gate has an invalid positive integer.');
+    throw new GateError('The gate has an invalid positive integer.');
   }
 
   return Number(number);

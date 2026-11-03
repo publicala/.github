@@ -1,4 +1,5 @@
 import { getOctokit } from '@actions/github';
+import { GateError } from '../../shared/src/failure.js';
 import type { Review } from './approval.js';
 import type { PullRequestSource } from './gate.js';
 import type { ChangedFile } from './size.js';
@@ -16,7 +17,7 @@ export function pullRequestSource(
 ): PullRequestSource {
   const pullRequest = octokit.rest.pulls.get({ owner, repo, pull_number: pullNumber }).then(({ data: pull }) => {
     if (pull.head.sha !== expectedHeadSha) {
-      throw new Error('The pull request head changed during evaluation.');
+      throw new GateError('The pull request head changed during evaluation.');
     }
 
     return pull;
@@ -47,7 +48,7 @@ export function pullRequestSource(
       });
 
       if (files.length !== changedFileCount) {
-        throw new Error('The pull request file list is incomplete.');
+        throw new GateError('The pull request file list is incomplete.');
       }
 
       return files.map((file): ChangedFile => ({
@@ -122,7 +123,7 @@ function isNotFound(error: unknown): boolean {
 
 function positiveInteger(value: unknown, field: string): number {
   if (!Number.isSafeInteger(value) || Number(value) <= 0) {
-    throw new Error(`The pull request ${field} is invalid.`);
+    throw new GateError(`The pull request ${field} is invalid.`);
   }
 
   return Number(value);
@@ -130,7 +131,7 @@ function positiveInteger(value: unknown, field: string): number {
 
 function nonNegativeInteger(value: unknown, field: string): number {
   if (!Number.isSafeInteger(value) || Number(value) < 0) {
-    throw new Error(`The pull request ${field} is invalid.`);
+    throw new GateError(`The pull request ${field} is invalid.`);
   }
 
   return Number(value);

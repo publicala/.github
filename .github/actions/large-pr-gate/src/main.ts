@@ -1,26 +1,28 @@
 import * as core from '@actions/core';
 import * as github from '@actions/github';
+import { githubClient } from '../../shared/src/client.js';
+import { debugFailureDetail, GateError, gateFailureMessage } from '../../shared/src/failure.js';
+import { requiredInput } from '../../shared/src/inputs.js';
 import { evaluateGate } from './gate.js';
 import { pullRequestSource } from './github.js';
 
 type JsonObject = Record<string, unknown>;
 
-const ERROR_MESSAGE = 'The gate could not complete. Repository maintainers must inspect this run.';
 
 async function run(): Promise<void> {
   try {
     if (github.context.eventName !== 'pull_request_target') {
-      throw new Error('The gate received an unsupported event.');
+      throw new GateError('The gate received an unsupported event.');
     }
 
-    const repositoryToken = core.getInput('repository-token', { required: true });
-    const maxLines = positiveInteger(core.getInput('max-lines', { required: true }));
+    const repositoryToken = requiredInput('repository-token');
+    const maxLines = positiveInteger(requiredInput('max-lines'));
     core.setSecret(repositoryToken);
 
     const { owner, repo } = github.context.repo;
     const event = pullRequestEvent(github.context.payload as JsonObject);
     const result = await evaluateGate(
-      pullRequestSource(github.getOctokit(repositoryToken), owner, repo, event.number, event.headSha),
+      pullRequestSource(githubClient(repositoryToken), owner, repo, event.number, event.headSha),
       maxLines,
     );
     const lines = result.lines.toLocaleString('en-US');
@@ -41,13 +43,19 @@ async function run(): Promise<void> {
     await report(message);
     core.setFailed(message);
   } catch (error) {
-    core.debug(error instanceof Error ? error.message : String(error));
-    core.setFailed(ERROR_MESSAGE);
+    core.debug(debugFailureDetail(error));
+    const message = gateFailureMessage(error);
+    core.setFailed(message);
+    await writeSummary(message).catch(() => undefined);
   }
 }
 
 async function report(message: string): Promise<void> {
   core.info(message);
+  await writeSummary(message);
+}
+
+async function writeSummary(message: string): Promise<void> {
   await core.summary
     .addHeading('Large PR gate')
     .addRaw(`${message}\n`)
@@ -66,7 +74,7 @@ function pullRequestEvent(payload: JsonObject): { number: number; headSha: strin
 
 function object(value: unknown): JsonObject {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) {
-    throw new Error('The pull request event is incomplete.');
+    throw new GateError('The pull request event is incomplete.');
   }
 
   return value as JsonObject;
@@ -74,7 +82,7 @@ function object(value: unknown): JsonObject {
 
 function requiredString(value: unknown): string {
   if (typeof value !== 'string' || value.trim() === '') {
-    throw new Error('The pull request event is incomplete.');
+    throw new GateError('The pull request event is incomplete.');
   }
 
   return value;
@@ -84,7 +92,7 @@ function positiveInteger(value: unknown): number {
   const number = typeof value === 'string' && /^\d+$/.test(value) ? Number(value) : value;
 
   if (!Number.isSafeInteger(number) || Number(number) <= 0) {
-    throw new Error('The gate has an invalid positive integer.');
+    throw new GateError('The gate has an invalid positive integer.');
   }
 
   return Number(number);

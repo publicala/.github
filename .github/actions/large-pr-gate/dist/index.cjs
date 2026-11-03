@@ -20289,6 +20289,9 @@ function debug(message) {
 function error(message, properties = {}) {
   issueCommand("error", toCommandProperties(properties), message instanceof Error ? message.toString() : message);
 }
+function warning(message, properties = {}) {
+  issueCommand("warning", toCommandProperties(properties), message instanceof Error ? message.toString() : message);
+}
 function info(message) {
   process.stdout.write(message + os3.EOL);
 }
@@ -24378,6 +24381,93 @@ function getOctokit(token, options, ...additionalPlugins) {
   return new GitHubWithPlugins(getOctokitOptions(token, options));
 }
 
+// .github/actions/shared/src/client.ts
+var CLIENT_WARNING = "The GitHub API client reported a warning. Its text stays out of public logs.";
+var PUBLIC_SAFE_LOG = {
+  debug: () => void 0,
+  info: () => void 0,
+  warn: () => warning(CLIENT_WARNING),
+  error: () => warning(CLIENT_WARNING)
+};
+function githubClient(token) {
+  return getOctokit(token, { log: PUBLIC_SAFE_LOG, request: { ...defaults.request, log: PUBLIC_SAFE_LOG } });
+}
+
+// .github/actions/shared/src/failure.ts
+var GateError = class extends Error {
+  publicReason;
+  constructor(publicReason, detail = publicReason) {
+    super(detail);
+    this.name = "GateError";
+    this.publicReason = publicReason;
+  }
+};
+function gateFailureMessage(error2) {
+  return `The gate could not complete. Reason: ${publicFailureReason(error2)} Repository maintainers must inspect this run.`;
+}
+function debugFailureDetail(error2) {
+  if (error2 instanceof GateError) {
+    return error2.message;
+  }
+  if (!(error2 instanceof Error)) {
+    return `A non-error value of type ${typeof error2} was thrown.`;
+  }
+  const frames = stackFrames(error2);
+  return frames === void 0 ? error2.name : `${error2.name}
+${frames}`;
+}
+function stackFrames(error2) {
+  const stack = error2.stack ?? "";
+  const header = [error2.name, "Error", error2.constructor.name].map((name) => error2.message === "" ? name : `${name}: ${error2.message}`).find((candidate) => stack.startsWith(`${candidate}
+`));
+  return header === void 0 ? void 0 : stack.slice(header.length + 1);
+}
+function publicFailureReason(error2) {
+  if (error2 instanceof GateError) {
+    return error2.publicReason;
+  }
+  const requestFailure = githubRequestFailure(error2);
+  if (requestFailure !== void 0) {
+    return requestFailure;
+  }
+  return "An unexpected error occurred.";
+}
+function githubRequestFailure(error2) {
+  if (!isRecord(error2) || typeof error2.status !== "number" || !isRecord(error2.request)) {
+    return void 0;
+  }
+  const { method, url } = error2.request;
+  if (typeof method !== "string" || typeof url !== "string" || !URL.canParse(url)) {
+    return void 0;
+  }
+  const request2 = `${method.toUpperCase()} ${new URL(url).pathname}`;
+  if (!isRecord(error2.response) || typeof error2.response.status !== "number") {
+    return `A GitHub API request failed before GitHub sent a response: ${request2}.`;
+  }
+  const reason = `A GitHub API request failed: ${request2} returned HTTP ${error2.response.status}.`;
+  const requestId = githubRequestId(error2.response);
+  return requestId === void 0 ? reason : `${reason} GitHub request ID: ${requestId}.`;
+}
+function githubRequestId(response) {
+  if (!isRecord(response) || !isRecord(response.headers)) {
+    return void 0;
+  }
+  const requestId = response.headers["x-github-request-id"];
+  return typeof requestId === "string" && /^[0-9A-Fa-f:]{1,64}$/.test(requestId) ? requestId : void 0;
+}
+function isRecord(value) {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+// .github/actions/shared/src/inputs.ts
+function requiredInput(name) {
+  const value = getInput(name);
+  if (value === "") {
+    throw new GateError(`The ${name} input is required.`);
+  }
+  return value;
+}
+
 // .github/actions/large-pr-gate/src/approval.ts
 var DECISIVE_STATES = /* @__PURE__ */ new Set(["APPROVED", "CHANGES_REQUESTED", "DISMISSED"]);
 function approvalCandidates(reviews, authorId) {
@@ -24522,7 +24612,7 @@ var MAX_CHANGED_FILES = 3e3;
 function pullRequestSource(octokit, owner, repo, pullNumber, expectedHeadSha) {
   const pullRequest = octokit.rest.pulls.get({ owner, repo, pull_number: pullNumber }).then(({ data: pull }) => {
     if (pull.head.sha !== expectedHeadSha) {
-      throw new Error("The pull request head changed during evaluation.");
+      throw new GateError("The pull request head changed during evaluation.");
     }
     return pull;
   });
@@ -24547,7 +24637,7 @@ function pullRequestSource(octokit, owner, repo, pullNumber, expectedHeadSha) {
         per_page: 100
       });
       if (files.length !== changedFileCount) {
-        throw new Error("The pull request file list is incomplete.");
+        throw new GateError("The pull request file list is incomplete.");
       }
       return files.map((file) => ({
         filename: file.filename,
@@ -24608,31 +24698,30 @@ function isNotFound(error2) {
 }
 function positiveInteger(value, field) {
   if (!Number.isSafeInteger(value) || Number(value) <= 0) {
-    throw new Error(`The pull request ${field} is invalid.`);
+    throw new GateError(`The pull request ${field} is invalid.`);
   }
   return Number(value);
 }
 function nonNegativeInteger(value, field) {
   if (!Number.isSafeInteger(value) || Number(value) < 0) {
-    throw new Error(`The pull request ${field} is invalid.`);
+    throw new GateError(`The pull request ${field} is invalid.`);
   }
   return Number(value);
 }
 
 // .github/actions/large-pr-gate/src/main.ts
-var ERROR_MESSAGE = "The gate could not complete. Repository maintainers must inspect this run.";
 async function run() {
   try {
     if (context2.eventName !== "pull_request_target") {
-      throw new Error("The gate received an unsupported event.");
+      throw new GateError("The gate received an unsupported event.");
     }
-    const repositoryToken = getInput("repository-token", { required: true });
-    const maxLines = positiveInteger2(getInput("max-lines", { required: true }));
+    const repositoryToken = requiredInput("repository-token");
+    const maxLines = positiveInteger2(requiredInput("max-lines"));
     setSecret(repositoryToken);
     const { owner, repo } = context2.repo;
     const event = pullRequestEvent(context2.payload);
     const result = await evaluateGate(
-      pullRequestSource(getOctokit(repositoryToken), owner, repo, event.number, event.headSha),
+      pullRequestSource(githubClient(repositoryToken), owner, repo, event.number, event.headSha),
       maxLines
     );
     const lines = result.lines.toLocaleString("en-US");
@@ -24649,12 +24738,17 @@ async function run() {
     await report(message);
     setFailed(message);
   } catch (error2) {
-    debug(error2 instanceof Error ? error2.message : String(error2));
-    setFailed(ERROR_MESSAGE);
+    debug(debugFailureDetail(error2));
+    const message = gateFailureMessage(error2);
+    setFailed(message);
+    await writeSummary(message).catch(() => void 0);
   }
 }
 async function report(message) {
   info(message);
+  await writeSummary(message);
+}
+async function writeSummary(message) {
   await summary.addHeading("Large PR gate").addRaw(`${message}
 `).write();
 }
@@ -24668,20 +24762,20 @@ function pullRequestEvent(payload) {
 }
 function object(value) {
   if (value === null || typeof value !== "object" || Array.isArray(value)) {
-    throw new Error("The pull request event is incomplete.");
+    throw new GateError("The pull request event is incomplete.");
   }
   return value;
 }
 function requiredString(value) {
   if (typeof value !== "string" || value.trim() === "") {
-    throw new Error("The pull request event is incomplete.");
+    throw new GateError("The pull request event is incomplete.");
   }
   return value;
 }
 function positiveInteger2(value) {
   const number = typeof value === "string" && /^\d+$/.test(value) ? Number(value) : value;
   if (!Number.isSafeInteger(number) || Number(number) <= 0) {
-    throw new Error("The gate has an invalid positive integer.");
+    throw new GateError("The gate has an invalid positive integer.");
   }
   return Number(number);
 }
