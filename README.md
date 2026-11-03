@@ -6,7 +6,7 @@ Org-wide GitHub configuration for publica.la.
 
 - **`.github/workflows/secret-scan.yml`**: the centralized gitleaks secret-leak scan. An organization repository ruleset ("Require workflows to pass before merging") points at this workflow and enforces it on every repository's pull requests, so no per-repo workflow file is needed. Detection rules and tuning happen here, once, for the whole fleet.
 - **`.github/workflows/dependabot-critical-gate.yml`**: the organization-wide Critical Dependabot alert gate. It blocks merges after the seven-day SLA and lets verified Dependabot repairs proceed.
-- **`.github/workflows/large-pr-gate.yml`**: the organization-wide large pull request gate. It blocks a merge above 20,000 reviewable changed lines until a human other than the author approves the head commit.
+- **`.github/workflows/large-pr-gate.yml`**: the organization-wide large pull request gate. It blocks a merge above 20,000 reviewable changed lines until a human other than the author approves it.
 - **`PULL_REQUEST_TEMPLATE.md`**: the org-wide default pull request template. GitHub serves it in the web compose form of every publicala repository that carries no template of its own, including repositories that do not exist yet. It is a copy: the canonical body lives at [`pla-stack/references/pull_request_template.md`](https://github.com/publicala/pla-stack/blob/main/references/pull_request_template.md), and the `pull-request-template-audit` routine keeps this copy and every per-repo copy in sync with it. Edit the canonical, not this file.
 
 ## Dependabot Critical gate
@@ -39,7 +39,7 @@ Pull request starts
 │   └── Pass
 ├── Reviewable lines <= 20,000
 │   └── Pass
-├── Latest decisive review of a human with write access, other than the author, approves the head commit
+├── Latest decisive review of a human with write access, other than the author, approves
 │   └── Pass
 └── Any other pull request
     └── Fail
@@ -47,7 +47,7 @@ Pull request starts
 
 Reviewable lines exclude lockfiles, minified assets, source maps, snapshots, and paths that the base commit's root `.gitattributes` marks `linguist-generated` or `linguist-vendored`. A `-linguist-generated` line counts a default exclusion again. The gate reads `.gitattributes` from the base commit, so a pull request cannot reclassify its own lines. Above GitHub's 3,000-file list limit, the gate counts every line.
 
-A review counts when its reviewer is a `User`, is not the pull request author, approved the current head commit, and has `admin` or `write` permission on the repository. The gate reads the permission from the collaborator permission endpoint, which resolves team, organization base, and custom role grants. Organization membership alone does not count. A later change request or dismissal replaces the approval. A push after the approval needs a new approval.
+A review counts when its reviewer is a `User`, is not the pull request author, approved the pull request, and has `admin` or `write` permission on the repository. The gate reads the permission from the collaborator permission endpoint, which resolves team, organization base, and custom role grants. Organization membership alone does not count. A later change request or dismissal replaces the approval. A push after the approval keeps it.
 
 Required workflows do not run on review events. After approving, re-run `Large PR approval gate` from the pull request's Checks tab.
 

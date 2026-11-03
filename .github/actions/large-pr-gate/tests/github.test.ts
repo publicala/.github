@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { evaluateGate } from '../src/gate.js';
 import { pullRequestSource } from '../src/github.js';
 
 type Client = Parameters<typeof pullRequestSource>[0];
@@ -60,7 +61,7 @@ function client(options: {
 test('reads pull request facts', async () => {
   const source = pullRequestSource(client(), 'acme', 'example', 42, 'head-sha');
 
-  assert.deepEqual(await source.pull(), { authorId: 1, headSha: 'head-sha', additions: 30_000, deletions: 10 });
+  assert.deepEqual(await source.pull(), { authorId: 1, additions: 30_000, deletions: 10 });
 });
 
 test('fails when the head moved during evaluation', async () => {
@@ -114,7 +115,7 @@ test('maps reviews and skips deleted reviewers', async () => {
   ] }), 'acme', 'example', 42, 'head-sha').reviews();
 
   assert.deepEqual(reviews, [
-    { reviewerId: 2, reviewerLogin: 'reviewer', reviewerType: 'User', state: 'APPROVED', commitId: 'head-sha' },
+    { reviewerId: 2, reviewerLogin: 'reviewer', reviewerType: 'User', state: 'APPROVED' },
   ]);
 });
 
@@ -132,4 +133,12 @@ test('treats an unknown reviewer as no access and rethrows other errors', async 
 
   const forbidden = client({ permission: () => { throw Object.assign(new Error('Forbidden'), { status: 403 }); } });
   await assert.rejects(pullRequestSource(forbidden, 'acme', 'example', 42, 'head-sha').hasWriteAccess('reviewer'), /Forbidden/);
+});
+
+test('an approval of an earlier commit passes the gate after a push', async () => {
+  const source = pullRequestSource(client({ reviews: [
+    { user: { id: 2, login: 'reviewer', type: 'User' }, state: 'APPROVED', commit_id: 'earlier-sha' },
+  ] }), 'acme', 'example', 42, 'head-sha');
+
+  assert.equal((await evaluateGate(source, 20_000)).decision, 'approved');
 });
