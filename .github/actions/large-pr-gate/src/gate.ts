@@ -3,7 +3,6 @@ import { generatedPathMatcher, reviewableLines, type ChangedFile } from './size.
 
 export interface PullRequestFacts {
   authorId: number;
-  headSha: string;
   additions: number;
   deletions: number;
 }
@@ -39,7 +38,7 @@ export async function evaluateGate(source: PullRequestSource, maxLines: number):
     return { decision: 'pass', lines };
   }
 
-  for (const login of approvalCandidates(await source.reviews(), pull.authorId, pull.headSha)) {
+  for (const login of approvalCandidates(await source.reviews(), pull.authorId)) {
     if (await source.hasWriteAccess(login)) {
       return { decision: 'approved', lines };
     }

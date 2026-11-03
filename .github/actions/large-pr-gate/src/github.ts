@@ -28,7 +28,6 @@ export function pullRequestSource(
 
       return {
         authorId: positiveInteger(pull.user?.id, 'author'),
-        headSha: pull.head.sha,
         additions: nonNegativeInteger(pull.additions, 'addition count'),
         deletions: nonNegativeInteger(pull.deletions, 'deletion count'),
       };
@@ -97,7 +96,6 @@ export function pullRequestSource(
           reviewerLogin: review.user.login,
           reviewerType: review.user.type,
           state: review.state,
-          commitId: review.commit_id,
         }]);
     },
 

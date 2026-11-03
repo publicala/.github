@@ -32,12 +32,12 @@ async function run(): Promise<void> {
     }
 
     if (result.decision === 'approved') {
-      await report(`This pull request changes ${lines} reviewable lines, above the ${limit} limit. A human reviewer approved the head commit.`);
+      await report(`This pull request changes ${lines} reviewable lines, above the ${limit} limit. A human reviewer approved it.`);
       return;
     }
 
     const message = `This pull request changes ${lines} reviewable lines, above the ${limit} limit. `
-      + 'A human with write access, other than the author, must approve the head commit. Then re-run this check.';
+      + 'A human with write access, other than the author, must approve it. Then re-run this check.';
     await report(message);
     core.setFailed(message);
   } catch (error) {

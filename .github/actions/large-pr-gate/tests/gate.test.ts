@@ -9,7 +9,6 @@ const APPROVAL: Review = {
   reviewerLogin: 'reviewer',
   reviewerType: 'User',
   state: 'APPROVED',
-  commitId: 'head-sha',
 };
 
 function source(options: {
@@ -26,7 +25,7 @@ function source(options: {
     calls,
     async pull() {
       calls.push('pull');
-      return { authorId: 1, headSha: 'head-sha', additions: options.additions, deletions: options.deletions ?? 0 };
+      return { authorId: 1, additions: options.additions, deletions: options.deletions ?? 0 };
     },
     async files() {
       calls.push('files');
@@ -77,7 +76,7 @@ test('blocks a large pull request without an approval', async () => {
   assert.deepEqual(await evaluateGate(pull, 20_000), { decision: 'block', lines: 88_329 });
 });
 
-test('passes a large pull request with a human approval of the head', async () => {
+test('passes a large pull request with a human approval', async () => {
   const pull = source({
     additions: 30_000,
     files: [{ filename: 'src/feature.ts', additions: 30_000, deletions: 0 }],

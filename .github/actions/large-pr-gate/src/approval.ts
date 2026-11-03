@@ -3,18 +3,17 @@ export interface Review {
   reviewerLogin: string;
   reviewerType: string;
   state: string;
-  commitId: string | null;
 }
 
 // GitHub keeps the latest decisive review per reviewer. A comment does not
-// replace an approval, a change request or a dismissal does.
+// replace an approval, a change request or a dismissal does. A push after
+// the approval keeps it, like the default branch protection.
 const DECISIVE_STATES = new Set(['APPROVED', 'CHANGES_REQUESTED', 'DISMISSED']);
 
 // Reviewers whose approval counts once their repository permission is confirmed.
 export function approvalCandidates(
   reviews: readonly Review[],
   authorId: number,
-  headSha: string,
 ): string[] {
   const latest = new Map<number, Review>();
 
@@ -26,7 +25,6 @@ export function approvalCandidates(
 
   return [...latest.values()]
     .filter((review) => review.state === 'APPROVED'
-      && review.commitId === headSha
       && review.reviewerId !== authorId
       && review.reviewerType === 'User')
     .map((review) => review.reviewerLogin);

@@ -1,5 +1,5 @@
 name: Large PR Gate
-description: Blocks merging a pull request above the reviewable line limit until a human other than the author approves its head commit.
+description: Blocks merging a pull request above the reviewable line limit until a human other than the author approves it.
 
 inputs:
   repository-token:

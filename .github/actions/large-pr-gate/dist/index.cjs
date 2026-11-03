@@ -24380,14 +24380,14 @@ function getOctokit(token, options, ...additionalPlugins) {
 
 // .github/actions/large-pr-gate/src/approval.ts
 var DECISIVE_STATES = /* @__PURE__ */ new Set(["APPROVED", "CHANGES_REQUESTED", "DISMISSED"]);
-function approvalCandidates(reviews, authorId, headSha) {
+function approvalCandidates(reviews, authorId) {
   const latest = /* @__PURE__ */ new Map();
   for (const review of reviews) {
     if (DECISIVE_STATES.has(review.state)) {
       latest.set(review.reviewerId, review);
     }
   }
-  return [...latest.values()].filter((review) => review.state === "APPROVED" && review.commitId === headSha && review.reviewerId !== authorId && review.reviewerType === "User").map((review) => review.reviewerLogin);
+  return [...latest.values()].filter((review) => review.state === "APPROVED" && review.reviewerId !== authorId && review.reviewerType === "User").map((review) => review.reviewerLogin);
 }
 
 // .github/actions/large-pr-gate/src/size.ts
@@ -24509,7 +24509,7 @@ async function evaluateGate(source, maxLines) {
   if (lines <= maxLines) {
     return { decision: "pass", lines };
   }
-  for (const login of approvalCandidates(await source.reviews(), pull.authorId, pull.headSha)) {
+  for (const login of approvalCandidates(await source.reviews(), pull.authorId)) {
     if (await source.hasWriteAccess(login)) {
       return { decision: "approved", lines };
     }
@@ -24531,7 +24531,6 @@ function pullRequestSource(octokit, owner, repo, pullNumber, expectedHeadSha) {
       const pull = await pullRequest;
       return {
         authorId: positiveInteger(pull.user?.id, "author"),
-        headSha: pull.head.sha,
         additions: nonNegativeInteger(pull.additions, "addition count"),
         deletions: nonNegativeInteger(pull.deletions, "deletion count")
       };
@@ -24587,8 +24586,7 @@ function pullRequestSource(octokit, owner, repo, pullNumber, expectedHeadSha) {
         reviewerId: review.user.id,
         reviewerLogin: review.user.login,
         reviewerType: review.user.type,
-        state: review.state,
-        commitId: review.commit_id
+        state: review.state
       }]);
     },
     // Team, organization base, and custom role grants resolve to admin, write, read, or none.
@@ -24644,10 +24642,10 @@ async function run() {
       return;
     }
     if (result.decision === "approved") {
-      await report(`This pull request changes ${lines} reviewable lines, above the ${limit} limit. A human reviewer approved the head commit.`);
+      await report(`This pull request changes ${lines} reviewable lines, above the ${limit} limit. A human reviewer approved it.`);
       return;
     }
-    const message = `This pull request changes ${lines} reviewable lines, above the ${limit} limit. A human with write access, other than the author, must approve the head commit. Then re-run this check.`;
+    const message = `This pull request changes ${lines} reviewable lines, above the ${limit} limit. A human with write access, other than the author, must approve it. Then re-run this check.`;
     await report(message);
     setFailed(message);
   } catch (error2) {
