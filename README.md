@@ -27,7 +27,7 @@ The repair exception requires the Dependabot bot identity on the pull request an
 
 The action reads GitHub API responses only. It does not read file contents, install dependencies, or execute pull request code. Incomplete Critical alert data and incomplete pull request data fail closed.
 
-The action reports only a generic pass, block, or error message. Alert identifiers, packages, manifests, versions, and dispositions do not enter public workflow logs.
+The action reports only a generic pass or block message, or an error reason (see [Gate errors](#gate-errors)). Alert identifiers, packages, manifests, versions, and dispositions do not enter public workflow logs.
 
 ## Large PR gate
 
@@ -56,6 +56,22 @@ A passed gate stays passed when the approval is later dismissed or replaced by a
 The gate cannot tell a person from an agent that acts with a person's token. An approval through a personal token counts as that person's approval.
 
 The ruleset has no merge bypass. An organization owner recovers a central failure by restoring the last known good workflow SHA or by moving only this ruleset to `Evaluate`.
+
+## Gate errors
+
+When a gate cannot decide, it fails with a reason you can act on:
+
+```text
+The gate could not complete. Reason: A GitHub API request failed: GET /repos/acme/example/dependabot/alerts returned HTTP 403. GitHub request ID: C0DE:12AB:3F4E5D:6A7B8C:69091A2B. Repository maintainers must inspect this run.
+```
+
+The reason is one of three kinds:
+
+- **A gate check**, such as an incomplete pull request event or a missing input. Every invalid Dependabot alert response shares one reason, so alert data never enters the log.
+- **A GitHub API failure**: the method, path, and HTTP status, plus GitHub's request ID when GitHub returned one. Give the request ID to GitHub Support. A request that failed before GitHub sent a response says so.
+- **An unexpected error**: anything else.
+
+Logs of public repositories are public, including debug logs. So the gates never log the message or body of a library error, and a GitHub API client warning prints as one fixed warning. A debug re-run adds the gate's own detail, or the error name and stack frames.
 
 ## Why this repo is public
 

@@ -1,4 +1,5 @@
 import { getOctokit } from '@actions/github';
+import { GateError } from '../../shared/src/failure.js';
 
 type Octokit = ReturnType<typeof getOctokit>;
 
@@ -25,7 +26,7 @@ export async function readPullRequestEvidence(
   const pull = response.data;
 
   if (pull.head.sha !== expectedHeadSha) {
-    throw new Error('The pull request head changed during evaluation.');
+    throw new GateError('The pull request head changed during evaluation.');
   }
 
   if (!isDependabotPullRequest(pull, owner, repo)) {
@@ -34,7 +35,7 @@ export async function readPullRequestEvidence(
 
   const commitCount = positiveInteger(pull.commits, 'commit count');
   if (commitCount > MAX_COMMITS) {
-    throw new Error('The pull request commit list exceeds the GitHub API limit.');
+    throw new GateError('The pull request commit list exceeds the GitHub API limit.');
   }
 
   const commits = await octokit.paginate(octokit.rest.pulls.listCommits, {
@@ -45,7 +46,7 @@ export async function readPullRequestEvidence(
   });
 
   if (commits.length !== commitCount) {
-    throw new Error('The pull request commit list is incomplete.');
+    throw new GateError('The pull request commit list is incomplete.');
   }
 
   if (!commits.every(isVerifiedDependabotCommit)) {
@@ -54,7 +55,7 @@ export async function readPullRequestEvidence(
 
   const changedFileCount = nonNegativeInteger(pull.changed_files, 'changed file count');
   if (changedFileCount > MAX_CHANGED_FILES) {
-    throw new Error('The pull request file list exceeds the GitHub API limit.');
+    throw new GateError('The pull request file list exceeds the GitHub API limit.');
   }
 
   const files = await octokit.paginate(octokit.rest.pulls.listFiles, {
@@ -65,7 +66,7 @@ export async function readPullRequestEvidence(
   });
 
   if (files.length !== changedFileCount) {
-    throw new Error('The pull request file list is incomplete.');
+    throw new GateError('The pull request file list is incomplete.');
   }
 
   return {
@@ -102,7 +103,7 @@ function ineligibleEvidence(): PullRequestEvidence {
 
 function positiveInteger(value: unknown, field: string): number {
   if (!Number.isSafeInteger(value) || Number(value) <= 0) {
-    throw new Error(`The pull request ${field} is invalid.`);
+    throw new GateError(`The pull request ${field} is invalid.`);
   }
 
   return Number(value);
@@ -110,7 +111,7 @@ function positiveInteger(value: unknown, field: string): number {
 
 function nonNegativeInteger(value: unknown, field: string): number {
   if (!Number.isSafeInteger(value) || Number(value) < 0) {
-    throw new Error(`The pull request ${field} is invalid.`);
+    throw new GateError(`The pull request ${field} is invalid.`);
   }
 
   return Number(value);

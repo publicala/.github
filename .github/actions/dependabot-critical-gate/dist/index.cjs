@@ -20289,6 +20289,9 @@ function debug(message) {
 function error(message, properties = {}) {
   issueCommand("error", toCommandProperties(properties), message instanceof Error ? message.toString() : message);
 }
+function warning(message, properties = {}) {
+  issueCommand("warning", toCommandProperties(properties), message instanceof Error ? message.toString() : message);
+}
 function info(message) {
   process.stdout.write(message + os3.EOL);
 }
@@ -24378,17 +24381,105 @@ function getOctokit(token, options, ...additionalPlugins) {
   return new GitHubWithPlugins(getOctokitOptions(token, options));
 }
 
+// .github/actions/shared/src/client.ts
+var CLIENT_WARNING = "The GitHub API client reported a warning. Its text stays out of public logs.";
+var PUBLIC_SAFE_LOG = {
+  debug: () => void 0,
+  info: () => void 0,
+  warn: () => warning(CLIENT_WARNING),
+  error: () => warning(CLIENT_WARNING)
+};
+function githubClient(token) {
+  return getOctokit(token, { log: PUBLIC_SAFE_LOG, request: { ...defaults.request, log: PUBLIC_SAFE_LOG } });
+}
+
+// .github/actions/shared/src/failure.ts
+var GateError = class extends Error {
+  publicReason;
+  constructor(publicReason, detail = publicReason) {
+    super(detail);
+    this.name = "GateError";
+    this.publicReason = publicReason;
+  }
+};
+function gateFailureMessage(error2) {
+  return `The gate could not complete. Reason: ${publicFailureReason(error2)} Repository maintainers must inspect this run.`;
+}
+function debugFailureDetail(error2) {
+  if (error2 instanceof GateError) {
+    return error2.message;
+  }
+  if (!(error2 instanceof Error)) {
+    return `A non-error value of type ${typeof error2} was thrown.`;
+  }
+  const frames = stackFrames(error2);
+  return frames === void 0 ? error2.name : `${error2.name}
+${frames}`;
+}
+function stackFrames(error2) {
+  const stack = error2.stack ?? "";
+  const header = [error2.name, "Error", error2.constructor.name].map((name) => error2.message === "" ? name : `${name}: ${error2.message}`).find((candidate) => stack.startsWith(`${candidate}
+`));
+  return header === void 0 ? void 0 : stack.slice(header.length + 1);
+}
+function publicFailureReason(error2) {
+  if (error2 instanceof GateError) {
+    return error2.publicReason;
+  }
+  const requestFailure = githubRequestFailure(error2);
+  if (requestFailure !== void 0) {
+    return requestFailure;
+  }
+  return "An unexpected error occurred.";
+}
+function githubRequestFailure(error2) {
+  if (!isRecord(error2) || typeof error2.status !== "number" || !isRecord(error2.request)) {
+    return void 0;
+  }
+  const { method, url } = error2.request;
+  if (typeof method !== "string" || typeof url !== "string" || !URL.canParse(url)) {
+    return void 0;
+  }
+  const request2 = `${method.toUpperCase()} ${new URL(url).pathname}`;
+  if (!isRecord(error2.response) || typeof error2.response.status !== "number") {
+    return `A GitHub API request failed before GitHub sent a response: ${request2}.`;
+  }
+  const reason = `A GitHub API request failed: ${request2} returned HTTP ${error2.response.status}.`;
+  const requestId = githubRequestId(error2.response);
+  return requestId === void 0 ? reason : `${reason} GitHub request ID: ${requestId}.`;
+}
+function githubRequestId(response) {
+  if (!isRecord(response) || !isRecord(response.headers)) {
+    return void 0;
+  }
+  const requestId = response.headers["x-github-request-id"];
+  return typeof requestId === "string" && /^[0-9A-Fa-f:]{1,64}$/.test(requestId) ? requestId : void 0;
+}
+function isRecord(value) {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+// .github/actions/shared/src/inputs.ts
+function requiredInput(name) {
+  const value = getInput(name);
+  if (value === "") {
+    throw new GateError(`The ${name} input is required.`);
+  }
+  return value;
+}
+
 // .github/actions/dependabot-critical-gate/src/alerts.ts
 var MAX_ALERTS = 1e4;
+var INVALID_ALERTS = "The Dependabot alerts response is invalid.";
 function overdueCriticalManifests(input, now, slaHours) {
   if (!Array.isArray(input)) {
-    throw new Error("The Dependabot alerts response is incomplete.");
+    throw new GateError(INVALID_ALERTS, "The Dependabot alerts response is incomplete.");
   }
   if (input.length > MAX_ALERTS) {
-    throw new Error("The Dependabot alerts response exceeds the safety limit.");
+    throw new GateError(INVALID_ALERTS, "The Dependabot alerts response exceeds the safety limit.");
   }
   if (!Number.isFinite(now.getTime()) || !Number.isSafeInteger(slaHours) || slaHours <= 0) {
-    throw new Error("The gate time configuration is invalid.");
+    throw new GateError("The gate time configuration is invalid.");
   }
   const manifests = /* @__PURE__ */ new Set();
   for (const value of input) {
@@ -24400,7 +24491,7 @@ function overdueCriticalManifests(input, now, slaHours) {
     }
     const createdAt = Date.parse(requiredString(alert.created_at, "created_at"));
     if (!Number.isFinite(createdAt)) {
-      throw new Error("A Critical Dependabot alert has an invalid creation time.");
+      throw new GateError(INVALID_ALERTS, "A Critical Dependabot alert has an invalid creation time.");
     }
     const age = now.getTime() - createdAt;
     if (age < slaHours * 60 * 60 * 1e3) {
@@ -24409,7 +24500,7 @@ function overdueCriticalManifests(input, now, slaHours) {
     const dependency = object(alert.dependency, "dependency");
     const manifest = requiredString(dependency.manifest_path, "manifest_path").replace(/^\/+/, "");
     if (manifest === "") {
-      throw new Error("A Critical Dependabot alert has an invalid manifest_path.");
+      throw new GateError(INVALID_ALERTS, "A Critical Dependabot alert has an invalid manifest_path.");
     }
     manifests.add(manifest);
   }
@@ -24417,13 +24508,13 @@ function overdueCriticalManifests(input, now, slaHours) {
 }
 function object(value, field) {
   if (value === null || typeof value !== "object" || Array.isArray(value)) {
-    throw new Error(`A Dependabot alert has an invalid ${field}.`);
+    throw new GateError(INVALID_ALERTS, `A Dependabot alert has an invalid ${field}.`);
   }
   return value;
 }
 function requiredString(value, field) {
   if (typeof value !== "string" || value.trim() === "") {
-    throw new Error(`A Dependabot alert has an invalid ${field}.`);
+    throw new GateError(INVALID_ALERTS, `A Dependabot alert has an invalid ${field}.`);
   }
   return value;
 }
@@ -24450,14 +24541,14 @@ async function readPullRequestEvidence(octokit, owner, repo, pullNumber, expecte
   const response = await octokit.rest.pulls.get({ owner, repo, pull_number: pullNumber });
   const pull = response.data;
   if (pull.head.sha !== expectedHeadSha) {
-    throw new Error("The pull request head changed during evaluation.");
+    throw new GateError("The pull request head changed during evaluation.");
   }
   if (!isDependabotPullRequest(pull, owner, repo)) {
     return ineligibleEvidence();
   }
   const commitCount = positiveInteger(pull.commits, "commit count");
   if (commitCount > MAX_COMMITS) {
-    throw new Error("The pull request commit list exceeds the GitHub API limit.");
+    throw new GateError("The pull request commit list exceeds the GitHub API limit.");
   }
   const commits = await octokit.paginate(octokit.rest.pulls.listCommits, {
     owner,
@@ -24466,14 +24557,14 @@ async function readPullRequestEvidence(octokit, owner, repo, pullNumber, expecte
     per_page: 100
   });
   if (commits.length !== commitCount) {
-    throw new Error("The pull request commit list is incomplete.");
+    throw new GateError("The pull request commit list is incomplete.");
   }
   if (!commits.every(isVerifiedDependabotCommit)) {
     return ineligibleEvidence();
   }
   const changedFileCount = nonNegativeInteger(pull.changed_files, "changed file count");
   if (changedFileCount > MAX_CHANGED_FILES) {
-    throw new Error("The pull request file list exceeds the GitHub API limit.");
+    throw new GateError("The pull request file list exceeds the GitHub API limit.");
   }
   const files = await octokit.paginate(octokit.rest.pulls.listFiles, {
     owner,
@@ -24482,7 +24573,7 @@ async function readPullRequestEvidence(octokit, owner, repo, pullNumber, expecte
     per_page: 100
   });
   if (files.length !== changedFileCount) {
-    throw new Error("The pull request file list is incomplete.");
+    throw new GateError("The pull request file list is incomplete.");
   }
   return {
     isVerifiedDependabot: true,
@@ -24500,13 +24591,13 @@ function ineligibleEvidence() {
 }
 function positiveInteger(value, field) {
   if (!Number.isSafeInteger(value) || Number(value) <= 0) {
-    throw new Error(`The pull request ${field} is invalid.`);
+    throw new GateError(`The pull request ${field} is invalid.`);
   }
   return Number(value);
 }
 function nonNegativeInteger(value, field) {
   if (!Number.isSafeInteger(value) || Number(value) < 0) {
-    throw new Error(`The pull request ${field} is invalid.`);
+    throw new GateError(`The pull request ${field} is invalid.`);
   }
   return Number(value);
 }
@@ -24514,19 +24605,18 @@ function nonNegativeInteger(value, field) {
 // .github/actions/dependabot-critical-gate/src/main.ts
 var PASS_MESSAGE = "This repository has no blocking Dependabot condition.";
 var BLOCK_MESSAGE = "Repository maintainers must review Dependabot alerts in the Security view.";
-var ERROR_MESSAGE = "The gate could not complete. Repository maintainers must inspect this run.";
 async function run() {
   try {
     if (context2.eventName !== "pull_request_target") {
-      throw new Error("The gate received an unsupported event.");
+      throw new GateError("The gate received an unsupported event.");
     }
-    const alertsToken = getInput("alerts-token", { required: true });
-    const repositoryToken = getInput("repository-token", { required: true });
-    const slaHours = positiveInteger2(getInput("sla-hours", { required: true }));
+    const alertsToken = requiredInput("alerts-token");
+    const repositoryToken = requiredInput("repository-token");
+    const slaHours = positiveInteger2(requiredInput("sla-hours"));
     setSecret(alertsToken);
     setSecret(repositoryToken);
     const { owner, repo } = context2.repo;
-    const alertsClient = getOctokit(alertsToken);
+    const alertsClient = githubClient(alertsToken);
     const alerts = await alertsClient.paginate(alertsClient.rest.dependabot.listAlertsForRepo, {
       owner,
       repo,
@@ -24539,7 +24629,7 @@ async function run() {
       return;
     }
     const event = pullRequestEvent(context2.payload);
-    const repositoryClient = getOctokit(repositoryToken);
+    const repositoryClient = githubClient(repositoryToken);
     const evidence = await readPullRequestEvidence(
       repositoryClient,
       owner,
@@ -24554,12 +24644,17 @@ async function run() {
     await report(BLOCK_MESSAGE);
     setFailed(BLOCK_MESSAGE);
   } catch (error2) {
-    debug(error2 instanceof Error ? error2.message : String(error2));
-    setFailed(ERROR_MESSAGE);
+    debug(debugFailureDetail(error2));
+    const message = gateFailureMessage(error2);
+    setFailed(message);
+    await writeSummary(message).catch(() => void 0);
   }
 }
 async function report(message) {
   info(message);
+  await writeSummary(message);
+}
+async function writeSummary(message) {
   await summary.addHeading("Dependabot Critical gate").addRaw(`${message}
 `).write();
 }
@@ -24573,20 +24668,20 @@ function pullRequestEvent(payload) {
 }
 function object2(value) {
   if (value === null || typeof value !== "object" || Array.isArray(value)) {
-    throw new Error("The pull request event is incomplete.");
+    throw new GateError("The pull request event is incomplete.");
   }
   return value;
 }
 function requiredString2(value) {
   if (typeof value !== "string" || value.trim() === "") {
-    throw new Error("The pull request event is incomplete.");
+    throw new GateError("The pull request event is incomplete.");
   }
   return value;
 }
 function positiveInteger2(value) {
   const number = typeof value === "string" && /^\d+$/.test(value) ? Number(value) : value;
   if (!Number.isSafeInteger(number) || Number(number) <= 0) {
-    throw new Error("The gate has an invalid positive integer.");
+    throw new GateError("The gate has an invalid positive integer.");
   }
   return Number(number);
 }

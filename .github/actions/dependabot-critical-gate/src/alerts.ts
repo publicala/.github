@@ -1,6 +1,11 @@
+import { GateError } from '../../shared/src/failure.js';
+
 type JsonObject = Record<string, unknown>;
 
 const MAX_ALERTS = 10_000;
+
+// Alert details stay out of public logs, so every alert data failure shares one reason.
+const INVALID_ALERTS = 'The Dependabot alerts response is invalid.';
 
 export function overdueCriticalManifests(
   input: unknown,
@@ -8,15 +13,15 @@ export function overdueCriticalManifests(
   slaHours: number,
 ): Set<string> {
   if (!Array.isArray(input)) {
-    throw new Error('The Dependabot alerts response is incomplete.');
+    throw new GateError(INVALID_ALERTS, 'The Dependabot alerts response is incomplete.');
   }
 
   if (input.length > MAX_ALERTS) {
-    throw new Error('The Dependabot alerts response exceeds the safety limit.');
+    throw new GateError(INVALID_ALERTS, 'The Dependabot alerts response exceeds the safety limit.');
   }
 
   if (!Number.isFinite(now.getTime()) || !Number.isSafeInteger(slaHours) || slaHours <= 0) {
-    throw new Error('The gate time configuration is invalid.');
+    throw new GateError('The gate time configuration is invalid.');
   }
 
   const manifests = new Set<string>();
@@ -32,7 +37,7 @@ export function overdueCriticalManifests(
 
     const createdAt = Date.parse(requiredString(alert.created_at, 'created_at'));
     if (!Number.isFinite(createdAt)) {
-      throw new Error('A Critical Dependabot alert has an invalid creation time.');
+      throw new GateError(INVALID_ALERTS, 'A Critical Dependabot alert has an invalid creation time.');
     }
 
     const age = now.getTime() - createdAt;
@@ -44,7 +49,7 @@ export function overdueCriticalManifests(
     const manifest = requiredString(dependency.manifest_path, 'manifest_path').replace(/^\/+/, '');
 
     if (manifest === '') {
-      throw new Error('A Critical Dependabot alert has an invalid manifest_path.');
+      throw new GateError(INVALID_ALERTS, 'A Critical Dependabot alert has an invalid manifest_path.');
     }
 
     manifests.add(manifest);
@@ -55,7 +60,7 @@ export function overdueCriticalManifests(
 
 function object(value: unknown, field: string): JsonObject {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) {
-    throw new Error(`A Dependabot alert has an invalid ${field}.`);
+    throw new GateError(INVALID_ALERTS, `A Dependabot alert has an invalid ${field}.`);
   }
 
   return value as JsonObject;
@@ -63,7 +68,7 @@ function object(value: unknown, field: string): JsonObject {
 
 function requiredString(value: unknown, field: string): string {
   if (typeof value !== 'string' || value.trim() === '') {
-    throw new Error(`A Dependabot alert has an invalid ${field}.`);
+    throw new GateError(INVALID_ALERTS, `A Dependabot alert has an invalid ${field}.`);
   }
 
   return value;

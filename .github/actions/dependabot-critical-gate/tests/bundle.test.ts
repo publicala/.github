@@ -14,7 +14,6 @@ test('loads the committed CommonJS action bundle under Node', () => {
   const output = `${result.stdout}\n${result.stderr}`;
 
   assert.equal(result.status, 1);
-  assert.match(output, /The gate could not complete/);
-  assert.match(output, /::debug::Input required and not supplied: alerts-token/);
+  assert.match(output, /::error::The gate could not complete\. Reason: The alerts-token input is required\. Repository maintainers must inspect this run\./);
   assert.doesNotMatch(output, /require is not defined/);
 });

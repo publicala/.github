@@ -60,6 +60,8 @@ jobs:
             .github/actions/large-pr-gate/tests \
             .github/actions/large-pr-gate/action.yml \
             .github/workflows/large-pr-gate.yml \
+            .github/actions/shared/src \
+            .github/actions/shared/tests \
             README.md \
             -type f -print0 \
             | xargs -0 grep -aEho '[[:alnum:]_]+' \
