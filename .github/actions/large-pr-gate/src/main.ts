@@ -11,7 +11,7 @@ type JsonObject = Record<string, unknown>;
 
 async function run(): Promise<void> {
   try {
-    if (github.context.eventName !== 'pull_request_target') {
+    if (github.context.eventName !== 'pull_request') {
       throw new GateError('The gate received an unsupported event.');
     }
 

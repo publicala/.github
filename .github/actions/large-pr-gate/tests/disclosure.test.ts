@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { MARKER, runBundle } from '../../shared/tests/bundle-run.js';
 
-const BUNDLE = '.github/actions/large-pr-gate/dist/index.cjs';
+const BUNDLE = { path: '.github/actions/large-pr-gate/dist/index.cjs', event: 'pull_request' };
 const INPUTS = { 'repository-token': 'repository-token-value', 'max-lines': '20000' };
 
 test('names a failed pull request read without its response body', async () => {

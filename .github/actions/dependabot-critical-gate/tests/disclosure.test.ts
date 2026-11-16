@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { MARKER, runBundle, type FakeGitHub } from '../../shared/tests/bundle-run.js';
 
-const BUNDLE = '.github/actions/dependabot-critical-gate/dist/index.cjs';
+const BUNDLE = { path: '.github/actions/dependabot-critical-gate/dist/index.cjs', event: 'pull_request_target' };
 const INPUTS = { 'alerts-token': 'alerts-token-value', 'repository-token': 'repository-token-value', 'sla-hours': '168' };
 const REQUEST_ID = 'C0DE:12AB:3F4E5D:6A7B8C:69091A2B';
 

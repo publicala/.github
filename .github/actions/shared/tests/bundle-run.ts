@@ -21,6 +21,12 @@ export interface BundleResult {
   summary: string;
 }
 
+// A built action and the event its workflow runs on.
+export interface Bundle {
+  path: string;
+  event: string;
+}
+
 /**
  * Runs a committed action bundle against a local GitHub API.
  *
@@ -28,7 +34,7 @@ export interface BundleResult {
  * test can check everything the runner would publish.
  */
 export async function runBundle(
-  bundle: string,
+  bundle: Bundle,
   inputs: Record<string, string>,
   github: FakeGitHub | 'unreachable',
 ): Promise<BundleResult> {
@@ -45,7 +51,7 @@ export async function runBundle(
     const env: NodeJS.ProcessEnv = {
       PATH: process.env.PATH,
       GITHUB_API_URL: apiUrl,
-      GITHUB_EVENT_NAME: 'pull_request_target',
+      GITHUB_EVENT_NAME: bundle.event,
       GITHUB_EVENT_PATH: eventPath,
       GITHUB_REPOSITORY: 'acme/example',
       GITHUB_STEP_SUMMARY: summaryPath,
@@ -56,7 +62,7 @@ export async function runBundle(
     }
 
     const { status, output } = await new Promise<{ status: number | null; output: string }>((resolve) => {
-      execFile(process.execPath, [bundle], { env, encoding: 'utf8' }, (error, stdout, stderr) => {
+      execFile(process.execPath, [bundle.path], { env, encoding: 'utf8' }, (error, stdout, stderr) => {
         resolve({ status: error === null ? 0 : (typeof error.code === 'number' ? error.code : null), output: `${stdout}\n${stderr}` });
       });
     });
