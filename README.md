@@ -11,7 +11,7 @@ Org-wide GitHub configuration for publica.la.
 
 ## Dependabot Critical gate
 
-The organization ruleset calls this workflow for `pull_request_target`. The workflow uses the trusted copy from this repository. It does not check out or execute a pull request tree.
+The organization ruleset calls this workflow for `pull_request_target`, since the gate needs its GitHub App secrets and `pull_request` withholds secrets from fork pull requests. GitHub blocks `pull_request_target` in public repositories unless an organization Actions event policy allows it, so that policy must allow this workflow. The workflow uses the trusted copy from this repository. It does not check out or execute a pull request tree.
 
 ```text
 Pull request starts
@@ -31,7 +31,7 @@ The action reports only a generic pass or block message, or an error reason (see
 
 ## Large PR gate
 
-The organization ruleset `Large PR gate` calls this workflow for `pull_request_target` on every repository's default branch. The workflow uses the trusted copy from this repository. It does not check out or execute a pull request tree.
+The organization ruleset `Large PR gate` calls this workflow for `pull_request` on every repository's default branch. It needs only a read-only token, so it runs in public repositories with no Actions event policy. The workflow uses the trusted copy from this repository. It does not check out or execute a pull request tree.
 
 ```text
 Pull request starts

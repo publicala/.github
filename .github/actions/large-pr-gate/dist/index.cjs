@@ -24797,7 +24797,7 @@ function nonNegativeInteger(value, field) {
 // .github/actions/large-pr-gate/src/main.ts
 async function run() {
   try {
-    if (context2.eventName !== "pull_request_target") {
+    if (context2.eventName !== "pull_request") {
       throw new GateError("The gate received an unsupported event.");
     }
     const repositoryToken = requiredInput("repository-token");
