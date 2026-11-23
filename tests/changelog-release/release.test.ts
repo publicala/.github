@@ -34,7 +34,6 @@ describe('Check release state', { skip: skipReason }, () => {
       assert.doesNotMatch(step.if ?? '', /\b(always|failure|cancelled)\s*\(/, `${step.name} runs after a failure`);
       assert.equal(step['continue-on-error'] ?? false, false, `${step.name} continues on error`);
     }
-    assert.equal(workflowSteps[release]?.['continue-on-error'] ?? false, false);
   });
 
   it('fails on an API error instead of reading absent', () => {
@@ -68,5 +67,13 @@ describe('Create immutable tag', { skip: skipReason }, () => {
     succeeded(runStep('Create immutable tag', { cwd: repo.dir, awk, env: { VERSION: '1.2.0', RELEASE_SHA: picked, GITHUB_SHA: head } }));
     assert.equal(remote.git('rev-parse', 'v1.2.0^{commit}'), picked);
     assert.equal(remote.git('cat-file', '-t', 'v1.2.0'), 'tag');
+  });
+});
+
+describe('Every run step', () => {
+  it('sets errexit, nounset and pipefail itself, since GitHub runs it with bash -e only', () => {
+    for (const step of workflowSteps.filter((s) => s.run)) {
+      assert.equal(step.run?.split('\n')[0], 'set -euo pipefail', `${step.name ?? step.id} does not open with set -euo pipefail`);
+    }
   });
 });

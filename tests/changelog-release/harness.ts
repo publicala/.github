@@ -1,5 +1,5 @@
 // Runs the step scripts of changelog-release.yml against real git fixtures.
-// The steps run as GitHub runs them (bash --noprofile --norc -eo pipefail),
+// The steps run as GitHub runs a run step with no shell (bash -e, without pipefail),
 // with a strict `gh` stub and a chosen `awk` first on PATH.
 import { spawnSync } from 'node:child_process';
 import { accessSync, chmodSync, constants, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
@@ -178,7 +178,8 @@ function runScript(script: string, options: RunOptions): StepResult {
   writeFileSync(scriptPath, script);
   writeFileSync(outputPath, '');
   writeFileSync(ghLog, '');
-  const result = spawnSync('bash', ['--noprofile', '--norc', '-eo', 'pipefail', scriptPath], {
+  // A run step with no shell runs as `bash -e {0}`: pipefail comes only from the step's own set line.
+  const result = spawnSync('bash', ['-e', scriptPath], {
     cwd: options.cwd,
     encoding: 'utf8',
     env: {

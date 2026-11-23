@@ -72,6 +72,14 @@ describe('Pick the commit to tag and Check immutable tag state', { skip: skipRea
   const tagState = (repo: Repo, env: Record<string, string>) =>
     runStep('tag', { cwd: repo.dir, awk, env: { VERSION: '1.0.0', ...env } });
 
+  it('tags the introduction commit when it is this run commit, without asking the API', () => {
+    // The common path: the release commit is HEAD. The strict gh stub fails any call.
+    const { repo, intro } = history();
+    const result = target(repo, { GITHUB_SHA: intro, INTRO_SHA: intro });
+    assert.equal(succeeded(result).sha, intro);
+    assert.deepEqual(result.ghCalls, []);
+  });
+
   it('tags the introduction commit when its ci-success passed', () => {
     const { repo, intro, head } = history();
     const picked = succeeded(target(repo, { GH_CI: `${intro}=success`, GITHUB_SHA: head, INTRO_SHA: intro }));

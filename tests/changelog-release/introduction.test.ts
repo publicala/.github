@@ -12,6 +12,14 @@ for (const awk of skipReason ? ['awk'] : awkVariants()) {
       assert.equal(succeeded(runStep('ver', { cwd: repo.dir, awk })).version, '1.1.0');
     });
 
+    it('fails "Read top version" when CHANGELOG.md has no version heading', () => {
+      const repo = new Repo();
+      repo.changelog('# Changelog\n\nNothing released yet.\n');
+      const result = runStep('ver', { cwd: repo.dir, awk });
+      assert.notEqual(result.status, 0);
+      assert.equal(result.outputs.version, undefined);
+    });
+
     it('finds the first version in history', () => {
       const repo = new Repo();
       const first = repo.release('1.0.0');
