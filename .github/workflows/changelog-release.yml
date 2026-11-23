@@ -1,0 +1,286 @@
+name: Changelog release
+
+# The release cut shared by the packages whose CHANGELOG.md drives their
+# releases. The caller's ci.yml owns the event routing, the needs DAG, the
+# green-CI gate and the ref hard-gate, and grants contents: write and
+# checks: read, since a called workflow only receives what the caller grants.
+
+on:
+  workflow_call:
+
+jobs:
+  release:
+    name: Cut release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Full history so we can peel vX.Y.Z to its introduction commit locally.
+          fetch-depth: 0
+
+      - name: Read top version
+        id: ver
+        run: |
+          set -euo pipefail
+          version=$(grep -m1 -E '^## v[0-9]+\.[0-9]+\.[0-9]+$' CHANGELOG.md | sed 's/^## v//')
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "Top version: v$version"
+
+      - name: Find introduction commit for this version
+        id: intro
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          set -euo pipefail
+          # Walk main's own CHANGELOG.md history oldest→newest (first parent, so a
+          # merge commit counts as the change rather than its feature branch). The introduction commit
+          # is the first one where the top `## vX.Y.Z` header equals VERSION
+          # (i.e., the transition from "previous version at top" to "VERSION
+          # at top"). This lets workflow_dispatch on main cut a release for a
+          # version whose merge commit is no longer HEAD — necessary because
+          # the safety gate restricts the job to refs/heads/main, and
+          # `--ref <older-commit>` would otherwise be blocked.
+          # A change to VERSION from no version or a lower one introduces it, as
+          # does its first appearance (such as a corrected heading). VERSION back
+          # at the top after a higher version is a revert of the newer entry or a
+          # heading corrected down to a version used before, and history cannot
+          # tell them apart. With a tag, the earlier introduction commit stays,
+          # and the existing tag decides. Without one, the step refuses to guess.
+          version_lt() {
+            [[ "$1" != "$2" && "$(printf '%s\n%s\n' "$1" "$2" | sort -V | sed -n 1p)" == "$1" ]]
+          }
+          release_sha=""
+          prev=""
+          seen=0
+          ambiguous=""
+          while IFS= read -r sha; do
+            # awk reads to the end: an early exit would close the pipe on git show,
+            # and pipefail would turn its SIGPIPE into an empty version.
+            v=$(git show "$sha:CHANGELOG.md" 2>/dev/null \
+              | awk '!found && /^## v[0-9]+\.[0-9]+\.[0-9]+$/ { sub(/^## v/, ""); print; found = 1 }' || true)
+            # No version at the top resets prev, so a version added back counts.
+            if [[ -z "$v" ]]; then prev=""; continue; fi
+            if [[ "$v" == "$VERSION" && "$prev" != "$VERSION" ]]; then
+              if ! (( seen )) || [[ -z "$prev" ]] || version_lt "$prev" "$VERSION"; then
+                release_sha=$sha
+                ambiguous=""
+              else
+                ambiguous=$sha
+              fi
+              seen=1
+            fi
+            prev=$v
+          done < <(git log --reverse --first-parent --format=%H -- CHANGELOG.md)
+
+          if [[ -z "$release_sha" ]]; then
+            echo "::error file=CHANGELOG.md::Could not find commit where v$VERSION was introduced at the top of CHANGELOG.md. Aborting."
+            exit 1
+          fi
+          if [[ -n "$ambiguous" ]] && ! git rev-parse --verify "refs/tags/v$VERSION" >/dev/null 2>&1; then
+            echo "::error file=CHANGELOG.md::v$VERSION came back to the top at $ambiguous after a higher version, first introduced at $release_sha. That is a revert or a heading corrected to a version used before. Tag the right commit and publish its release by hand."
+            exit 1
+          fi
+          echo "sha=$release_sha" >> "$GITHUB_OUTPUT"
+          echo "Release commit for v$VERSION: $release_sha"
+
+      - name: Pick the commit to tag
+        # The introduction commit, when its own ci-success passed. This run tested
+        # github.sha, so the introduction commit passes when it is github.sha.
+        # When it failed, github.sha stands in for it if both commits ship the
+        # same package: the same git archive, which is what Composer installs
+        # (every file .gitattributes does not mark export-ignore). The package
+        # then ships from a commit whose CI is green. Re-running CI on the failed
+        # commit cannot help when the fix is in a workflow, since a re-run uses
+        # that commit's own workflow files. An existing tag keeps its commit.
+        id: target
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.ver.outputs.version }}
+          INTRO_SHA: ${{ steps.intro.outputs.sha }}
+        run: |
+          set -euo pipefail
+          # This run's ci-success passed before the job started, so github.sha is green.
+          ci_success() {
+            if [[ "$1" == "$GITHUB_SHA" ]]; then echo success; return; fi
+            gh api "repos/$GITHUB_REPOSITORY/commits/$1/check-runs?check_name=ci-success&filter=latest" \
+              --jq '.check_runs[0].conclusion // "missing"'
+          }
+          # Each archive applies its own commit's .gitattributes. A failed archive
+          # reads as a different package, so the step refuses rather than guess.
+          same_package() {
+            local a b
+            a=$(mktemp -d)
+            b=$(mktemp -d)
+            git archive "$1" | tar -x -C "$a" || return 1
+            git archive "$2" | tar -x -C "$b" || return 1
+            diff -r --no-dereference "$a" "$b" >/dev/null || return 1
+            # diff reads contents only, so the file modes are compared on their own.
+            # NUL-terminated records, since a path may hold a newline.
+            cmp -s <(cd "$a" && find . -printf '%m %p\0' | sort -z) \
+              <(cd "$b" && find . -printf '%m %p\0' | sort -z)
+          }
+          # A tag an earlier run created stays the target while it ships the same
+          # package from a green commit, so a retry after a failed release step
+          # finds it in place. Any other tag falls through to present_elsewhere.
+          if git rev-parse --verify "refs/tags/v$VERSION" >/dev/null 2>&1; then
+            tag_commit=$(git rev-list -n 1 "v$VERSION")
+            if same_package "$INTRO_SHA" "$tag_commit" && [[ "$(ci_success "$tag_commit")" == "success" ]]; then
+              echo "sha=$tag_commit" >> "$GITHUB_OUTPUT"
+              echo "v$VERSION is already at $tag_commit, a green commit that ships the same package as $INTRO_SHA."
+              exit 0
+            fi
+          fi
+          conclusion=$(ci_success "$INTRO_SHA")
+          if [[ "$conclusion" == "success" ]]; then
+            echo "sha=$INTRO_SHA" >> "$GITHUB_OUTPUT"
+            echo "ci-success passed on $INTRO_SHA."
+            exit 0
+          fi
+          if same_package "$INTRO_SHA" "$GITHUB_SHA"; then
+            echo "sha=$GITHUB_SHA" >> "$GITHUB_OUTPUT"
+            echo "ci-success is '$conclusion' on $INTRO_SHA, and $GITHUB_SHA ships the same package with a green run, so v$VERSION tags $GITHUB_SHA."
+            exit 0
+          fi
+          # An existing tag the steps above did not pick is out-of-band, which the
+          # tag state step turns into a no-op rather than a failure.
+          if git rev-parse --verify "refs/tags/v$VERSION" >/dev/null 2>&1; then
+            echo "sha=$INTRO_SHA" >> "$GITHUB_OUTPUT"
+            echo "out_of_band=true" >> "$GITHUB_OUTPUT"
+            echo "v$VERSION exists at $(git rev-list -n 1 "v$VERSION"), which this run would not pick. Leaving it in place."
+            exit 0
+          fi
+          echo "::error::v$VERSION would tag $INTRO_SHA, whose ci-success check is '$conclusion', and the package changed after it. Rerun that commit's CI if the failure was not in a workflow, or ship the fix under a new version."
+          exit 1
+
+      - name: Check immutable tag state
+        id: tag
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+          RELEASE_SHA: ${{ steps.target.outputs.sha }}
+          OUT_OF_BAND: ${{ steps.target.outputs.out_of_band }}
+        run: |
+          set -euo pipefail
+          # Three outcomes, compared against the commit the previous step picked
+          # (not GITHUB_SHA, since dispatches on main may run from HEAD past the
+          # release commit):
+          #   absent            → create the tag at RELEASE_SHA
+          #   present_here      → tag already at RELEASE_SHA. Reconcile
+          #                       downstream artifacts (release).
+          #                       Partial-failure recovery path.
+          #   present_elsewhere → tag exists at a different commit. This is
+          #                       an out-of-band state we don't want to
+          #                       paper over → no-op the whole job.
+          if [[ "${OUT_OF_BAND:-}" == "true" ]]; then
+            echo "state=present_elsewhere" >> "$GITHUB_OUTPUT"
+            echo "v$VERSION is an out-of-band tag the previous step did not pick — no-op."
+            exit 0
+          fi
+          if ! git rev-parse --verify "refs/tags/v$VERSION" >/dev/null 2>&1; then
+            echo "state=absent" >> "$GITHUB_OUTPUT"
+            echo "v$VERSION does not exist yet — will create at $RELEASE_SHA."
+            exit 0
+          fi
+          tag_commit=$(git rev-list -n 1 "v$VERSION")
+          if [[ "$tag_commit" == "$RELEASE_SHA" ]]; then
+            echo "state=present_here" >> "$GITHUB_OUTPUT"
+            echo "v$VERSION already at $RELEASE_SHA — reconciling downstream artifacts."
+          else
+            echo "state=present_elsewhere" >> "$GITHUB_OUTPUT"
+            echo "v$VERSION already at $tag_commit (release commit is $RELEASE_SHA) — out-of-band state, no-op."
+          fi
+
+      - name: Check release state
+        # Before the tag, so a draft stops the run before anything is pushed, and
+        # a published release skips the notes and the publish.
+        id: release
+        if: steps.tag.outputs.state != 'present_elsewhere'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          set -euo pipefail
+          # The list includes drafts. A failed lookup fails the step, so an API
+          # error never reads as no release.
+          drafts=$(gh api --paginate "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
+            --jq ".[] | select(.tag_name == \"v$VERSION\") | .draft")
+          if grep -qx false <<< "$drafts"; then
+            echo "state=published" >> "$GITHUB_OUTPUT"
+            echo "Release v$VERSION already exists — no-op"
+          elif grep -qx true <<< "$drafts"; then
+            # A draft is not a published release, so it does not count as done.
+            echo "::error::A draft release for v$VERSION exists. Publish it or delete it, then rerun."
+            exit 1
+          else
+            echo "state=absent" >> "$GITHUB_OUTPUT"
+            echo "No release for v$VERSION yet — will publish one."
+          fi
+
+      - name: Extract release notes
+        # From the tagged commit, so the notes match what the tag ships.
+        if: steps.tag.outputs.state != 'present_elsewhere' && steps.release.outputs.state == 'absent'
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+          RELEASE_SHA: ${{ steps.target.outputs.sha }}
+        run: |
+          set -euo pipefail
+          # awk reads to the end: an early exit would close the pipe on git show,
+          # and pipefail would fail the step on its SIGPIPE.
+          # The block always ends at the next version heading, the same
+          # `## vX.Y.Z` line the other steps read. Any other "## " heading, such as
+          # a Versioning footer, ends it too, unless it sits inside a code fence.
+          # The fence check is a plain toggle: a misread can only move the end
+          # within this version's block, never into another version's notes.
+          git show "$RELEASE_SHA:CHANGELOG.md" | awk -v ver="$VERSION" '
+            BEGIN { capture = 0; done = 0; fence = 0 }
+            done { next }
+            /^## v[0-9]+\.[0-9]+\.[0-9]+$/ {
+              if (capture) { done = 1; next }
+              if ($0 == "## v" ver) { capture = 1; fence = 0; next }
+            }
+            capture && !fence && /^## / { done = 1; next }
+            /^[ \t]*(```|~~~)/ { fence = !fence }
+            capture { print }
+          ' \
+            | awk 'NF { found=1 } found' \
+            | awk '{ lines[NR] = $0 } END { last = NR; while (last > 0 && lines[last] == "") last--; for (i = 1; i <= last; i++) print lines[i] }' \
+            > release-notes.md
+          # Whitespace alone, such as a CRLF blank line, counts as no notes.
+          if ! grep -q '[^[:space:]]' release-notes.md; then
+            echo "::error file=CHANGELOG.md::CHANGELOG.md at $RELEASE_SHA has no notes under ## v$VERSION. Aborting before the tag and the release."
+            exit 1
+          fi
+          echo "::group::release-notes.md"
+          cat release-notes.md
+          echo "::endgroup::"
+
+      - name: Create immutable tag
+        if: steps.tag.outputs.state == 'absent'
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+          RELEASE_SHA: ${{ steps.target.outputs.sha }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "v$VERSION" -m "v$VERSION" "$RELEASE_SHA"
+          git push origin "v$VERSION"
+          echo "Tagged v$VERSION at $RELEASE_SHA"
+
+      - name: Create GitHub Release
+        if: steps.tag.outputs.state != 'present_elsewhere' && steps.release.outputs.state == 'absent'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.ver.outputs.version }}
+          RELEASE_SHA: ${{ steps.target.outputs.sha }}
+        run: |
+          set -euo pipefail
+          # --verify-tag refuses to create the tag, so a tag deleted after the
+          # tag step fails the run instead of being recreated on the default branch.
+          # --target covers a deletion between that check and the request: a
+          # recreated tag lands on RELEASE_SHA, never on the default branch tip.
+          gh release create "v$VERSION" \
+            --verify-tag \
+            --target "$RELEASE_SHA" \
+            --title "v$VERSION" \
+            --notes-file release-notes.md
+          echo "Published release v$VERSION"

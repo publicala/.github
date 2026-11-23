@@ -7,7 +7,34 @@ Org-wide GitHub configuration for publica.la.
 - **`.github/workflows/secret-scan.yml`**: the centralized gitleaks secret-leak scan. An organization repository ruleset ("Require workflows to pass before merging") points at this workflow and enforces it on every repository's pull requests, so no per-repo workflow file is needed. Detection rules and tuning happen here, once, for the whole fleet.
 - **`.github/workflows/dependabot-critical-gate.yml`**: the organization-wide Critical Dependabot alert gate. It blocks merges after the seven-day SLA and lets verified Dependabot repairs proceed.
 - **`.github/workflows/large-pr-gate.yml`**: the organization-wide large pull request gate. It blocks a merge above 20,000 reviewable changed lines until a human other than the author approves it.
+- **`.github/workflows/changelog-release.yml`**: the release cut of the public PHP packages whose `CHANGELOG.md` drives their releases. A package's `ci.yml` calls it from its `release` job, pinned by commit SHA. See [Changelog release](#changelog-release).
 - **`PULL_REQUEST_TEMPLATE.md`**: the org-wide default pull request template. GitHub serves it in the web compose form of every publicala repository that carries no template of its own, including repositories that do not exist yet. It is a copy: the canonical body lives at [`pla-stack/references/pull_request_template.md`](https://github.com/publicala/pla-stack/blob/main/references/pull_request_template.md), and the `pull-request-template-audit` routine keeps this copy and every per-repo copy in sync with it. Edit the canonical, not this file.
+
+## Changelog release
+
+The workflow tags the commit that first put the top `## vX.Y.Z` of `CHANGELOG.md` on `main` (the introduction commit), then publishes a GitHub Release from that block. A change to the version from no version or a lower one introduces it, as does its first appearance. When the version comes back to the top after a higher one, history cannot tell a revert from a heading corrected to a version used before: with a tag, the existing tag decides, and without one the run fails and asks for a manual release. The caller's `ci.yml` owns the event routing and the gate, and calls it only after its own `ci-success` passed on `main`. The caller grants `contents: write` and `checks: read`.
+
+```text
+Pick the commit to tag
+├── v$VERSION exists on a green commit whose git archive matches the introduction commit's
+│   └── That commit (a retry reconciles the release)
+├── The introduction commit is this run's commit, or its ci-success passed
+│   └── The introduction commit
+├── The introduction commit and this run's commit have the same git archive
+│   └── This run's commit
+├── v$VERSION exists at a commit the steps above did not pick
+│   └── None: the tag is out-of-band, and the run does nothing
+└── Any other case
+    └── Fail
+```
+
+A re-run of a red commit uses that commit's own workflow files, so a failure fixed in a workflow cannot turn it green. The third branch releases the same package from a green commit instead. The package is the commit's `git archive`, which is what Composer installs: every file its `.gitattributes` does not mark `export-ignore`.
+
+A tag already at another commit is left in place, and the run does nothing. Tags are never moved.
+
+A version heading is a line that is exactly `## vX.Y.Z`. A version's notes end at the next version heading, or at any other `##` heading outside a code fence, such as a `## Versioning` footer. The workflow does not parse Markdown: a literal `## vX.Y.Z` line inside a code fence also counts as a version heading, and an unusual fence can only move where the notes end inside the version's own block.
+
+A published release for the version is left as it is. The run fails before it tags when a draft release for the version exists (publish or delete the draft, then run it again), or when the version block at the tagged commit has no notes.
 
 ## Dependabot Critical gate
 
