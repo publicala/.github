@@ -32,6 +32,8 @@ A re-run of a red commit uses that commit's own workflow files, so a failure fix
 
 A tag already at another commit is left in place, and the run does nothing. Tags are never moved.
 
+`tests/changelog-release` runs each step's script against real git fixtures on Linux, under mawk and gawk, and CI runs it on every pull request (`npm run test:changelog-release`).
+
 A version heading is a line that is exactly `## vX.Y.Z`. A version's notes end at the next version heading, or at any other `##` heading outside a code fence, such as a `## Versioning` footer. The workflow does not parse Markdown: a literal `## vX.Y.Z` line inside a code fence also counts as a version heading, and an unusual fence can only move where the notes end inside the version's own block.
 
 A published release for the version is left as it is. The run fails before it tags when a draft release for the version exists (publish or delete the draft, then run it again), or when the version block at the tagged commit has no notes.

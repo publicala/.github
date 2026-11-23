@@ -21,3 +21,4 @@
 /package-lock.json                              @publicala/ci-owners
 /tsconfig.json                                  @publicala/ci-owners
 /.github/workflows/changelog-release.yml     @publicala/ci-owners
+/tests/changelog-release/                       @publicala/ci-owners

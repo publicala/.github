@@ -9,6 +9,7 @@
     "build:large-pr-gate": "esbuild .github/actions/large-pr-gate/src/main.ts --bundle --platform=node --target=node24 --format=cjs --outfile=.github/actions/large-pr-gate/dist/index.cjs --legal-comments=external",
     "check-bundle": "npm run build && git diff --exit-code -- .github/actions/dependabot-critical-gate/dist .github/actions/large-pr-gate/dist",
     "test": "node --import tsx --test '.github/actions/*/tests/**/*.test.ts'",
+    "test:changelog-release": "node --import tsx tests/changelog-release/run.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
@@ -19,7 +20,8 @@
     "@types/node": "24.13.3",
     "esbuild": "0.28.2",
     "tsx": "4.23.13",
-    "typescript": "7.0.2"
+    "typescript": "7.0.2",
+    "yaml": "2.9.1"
   },
   "engines": {
     "node": ">=24"
