@@ -101,6 +101,21 @@ jobs:
 
       - run: npm ci
 
+      - name: Install mawk and gawk
+        # The runner image does not promise either awk, and the tests require both.
+        run: |
+          set -euo pipefail
+          missing=()
+          for awk in mawk gawk; do
+            command -v "$awk" >/dev/null || missing+=("$awk")
+          done
+          if (( ${#missing[@]} > 0 )); then
+            sudo apt-get update -qq
+            sudo apt-get install -y -qq --no-install-recommends "${missing[@]}"
+          fi
+          mawk -W version 2>&1 | sed -n 1p
+          gawk --version | sed -n 1p
+
       - name: Run the workflow steps against git fixtures
         # Under both mawk and gawk, since the runner image decides which one is awk.
         env:
