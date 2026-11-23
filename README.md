@@ -12,7 +12,7 @@ Org-wide GitHub configuration for publica.la.
 
 ## Changelog release
 
-The workflow tags the commit that first put the top `## vX.Y.Z` of `CHANGELOG.md` on `main` (the introduction commit), then publishes a GitHub Release from that block. Only a step up from a lower version introduces a version: a revert of a newer entry brings the version back to the top but keeps its earlier introduction commit. The caller's `ci.yml` owns the event routing and the gate, and calls it only after its own `ci-success` passed on `main`. The caller grants `contents: write` and `checks: read`.
+The workflow tags the commit that first put the top `## vX.Y.Z` of `CHANGELOG.md` on `main` (the introduction commit), then publishes a GitHub Release from that block. A revert of a newer entry brings the version back to the top but keeps its earlier introduction commit. Any other change to the version introduces it, such as a step up or a corrected heading. The caller's `ci.yml` owns the event routing and the gate, and calls it only after its own `ci-success` passed on `main`. The caller grants `contents: write` and `checks: read`.
 
 ```text
 Pick the commit to tag
@@ -30,7 +30,7 @@ A re-run of a red commit uses that commit's own workflow files, so a failure fix
 
 A tag already at another commit is left in place, and the run does nothing. Tags are never moved.
 
-The run fails before it tags when the version block at the tagged commit has no notes. It fails before it publishes when a draft release for the version exists: publish or delete the draft, then run it again.
+A published release for the version is left as it is. The run fails before it tags when a draft release for the version exists (publish or delete the draft, then run it again), or when the version block at the tagged commit has no notes.
 
 ## Dependabot Critical gate
 
