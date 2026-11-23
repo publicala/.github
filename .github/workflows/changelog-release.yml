@@ -90,7 +90,9 @@ jobs:
             b=$(mktemp -d)
             git archive "$1" | tar -x -C "$a" || return 1
             git archive "$2" | tar -x -C "$b" || return 1
-            diff -r "$a" "$b" >/dev/null
+            diff -r --no-dereference "$a" "$b" >/dev/null || return 1
+            # diff reads contents only, so the file modes are compared on their own.
+            [[ "$(cd "$a" && find . -printf '%m %p\n' | sort)" == "$(cd "$b" && find . -printf '%m %p\n' | sort)" ]]
           }
           # A tag an earlier run created stays the target while it ships the same
           # package from a green commit, so a retry after a failed release step
@@ -149,19 +151,21 @@ jobs:
           fi
 
       - name: Extract release notes
+        # From the tagged commit, so the notes match what the tag ships.
         if: steps.tag.outputs.state != 'present_elsewhere'
         env:
           VERSION: ${{ steps.ver.outputs.version }}
+          RELEASE_SHA: ${{ steps.target.outputs.sha }}
         run: |
           set -euo pipefail
-          awk -v ver="$VERSION" '
+          git show "$RELEASE_SHA:CHANGELOG.md" | awk -v ver="$VERSION" '
             BEGIN { capture = 0 }
             /^## / {
               if (capture) exit
               if ($0 == "## v" ver) { capture = 1; next }
             }
             capture { print }
-          ' CHANGELOG.md \
+          ' \
             | awk 'NF { found=1 } found' \
             | awk '{ lines[NR] = $0 } END { last = NR; while (last > 0 && lines[last] == "") last--; for (i = 1; i <= last; i++) print lines[i] }' \
             > release-notes.md
@@ -193,7 +197,10 @@ jobs:
             echo "Release v$VERSION already exists — no-op"
             exit 0
           fi
+          # --verify-tag refuses to create the tag, so a tag deleted after the
+          # tag step fails the run instead of being recreated on the default branch.
           gh release create "v$VERSION" \
+            --verify-tag \
             --title "v$VERSION" \
             --notes-file release-notes.md
           echo "Published release v$VERSION"
