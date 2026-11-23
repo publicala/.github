@@ -32,6 +32,8 @@ A re-run of a red commit uses that commit's own workflow files, so a failure fix
 
 A tag already at another commit is left in place, and the run does nothing. Tags are never moved.
 
+A version heading is a line that is exactly `## vX.Y.Z`, and a version's notes run to the next one, so other `##` lines, such as a heading in a code example, stay in the notes. The workflow does not parse Markdown: a literal `## vX.Y.Z` line inside a code fence also counts as a version heading.
+
 A published release for the version is left as it is. The run fails before it tags when a draft release for the version exists (publish or delete the draft, then run it again), or when the version block at the tagged commit has no notes.
 
 ## Dependabot Critical gate
