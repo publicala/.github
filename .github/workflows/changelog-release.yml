@@ -12,6 +12,20 @@ jobs:
   release:
     name: Cut release
     runs-on: ubuntu-latest
+    env:
+      # An awk function the steps that read CHANGELOG.md headings share, so a
+      # "## " line inside a code fence is never a heading. fence_line returns 1
+      # on a fence line and keeps `fc` set while a fence is open. A fence closes
+      # only on the same character, at least as long as its opening, with
+      # nothing after it, as CommonMark requires.
+      FENCE_AWK: |
+        function fence_line(   m) {
+          if (!match($0, /^ ? ? ?(```+|~~~+)/)) return 0
+          m = substr($0, RSTART, RLENGTH); sub(/^ +/, "", m)
+          if (fc == "") { fc = substr(m, 1, 1); fl = length(m); return 1 }
+          if (substr(m, 1, 1) == fc && length(m) >= fl && substr($0, RSTART + RLENGTH) ~ /^[ \t]*$/) { fc = ""; fl = 0 }
+          return 1
+        }
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -22,7 +36,10 @@ jobs:
         id: ver
         run: |
           set -euo pipefail
-          version=$(grep -m1 -E '^## v[0-9]+\.[0-9]+\.[0-9]+$' CHANGELOG.md | sed 's/^## v//')
+          version=$(awk "$FENCE_AWK"'
+            fence_line() { next }
+            fc == "" && /^## v[0-9]+\.[0-9]+\.[0-9]+$/ { sub(/^## v/, ""); print; exit }
+          ' CHANGELOG.md)
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "Top version: v$version"
 
@@ -57,7 +74,10 @@ jobs:
             # awk reads to the end: an early exit would close the pipe on git show,
             # and pipefail would turn its SIGPIPE into an empty version.
             v=$(git show "$sha:CHANGELOG.md" 2>/dev/null \
-              | awk '!found && /^## v[0-9]+\.[0-9]+\.[0-9]+$/ { sub(/^## v/, ""); print; found = 1 }' || true)
+              | awk "$FENCE_AWK"'
+                fence_line() { next }
+                !found && fc == "" && /^## v[0-9]+\.[0-9]+\.[0-9]+$/ { sub(/^## v/, ""); print; found = 1 }
+              ' || true)
             # No version at the top resets prev, so a version added back counts.
             if [[ -z "$v" ]]; then prev=""; continue; fi
             if [[ "$v" == "$VERSION" && "$prev" != "$VERSION" ]]; then
@@ -225,15 +245,14 @@ jobs:
           set -euo pipefail
           # awk reads to the end: an early exit would close the pipe on git show,
           # and pipefail would fail the step on its SIGPIPE.
-          git show "$RELEASE_SHA:CHANGELOG.md" | awk -v ver="$VERSION" '
-            BEGIN { capture = 0; done = 0; fence = 0 }
+          git show "$RELEASE_SHA:CHANGELOG.md" | awk -v ver="$VERSION" "$FENCE_AWK"'
+            BEGIN { capture = 0; done = 0 }
             done { next }
-            !fence && /^## / {
+            fence_line() { if (capture) print; next }
+            fc == "" && /^## / {
               if (capture) { done = 1; next }
               if ($0 == "## v" ver) { capture = 1; next }
             }
-            # A "## " line inside a code fence is an example, not the next heading.
-            /^ ? ? ?(```|~~~)/ { fence = !fence }
             capture { print }
           ' \
             | awk 'NF { found=1 } found' \
