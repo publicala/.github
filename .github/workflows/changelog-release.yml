@@ -40,6 +40,12 @@ jobs:
           # version whose merge commit is no longer HEAD — necessary because
           # the safety gate restricts the job to refs/heads/main, and
           # `--ref <older-commit>` would otherwise be blocked.
+          # Only a step up from a lower version introduces VERSION. A revert of a
+          # newer entry brings VERSION back to the top without introducing it, so
+          # it keeps the earlier introduction commit.
+          version_lt() {
+            [[ "$1" != "$2" && "$(printf '%s\n%s\n' "$1" "$2" | sort -V | sed -n 1p)" == "$1" ]]
+          }
           release_sha=""
           prev=""
           while IFS= read -r sha; do
@@ -47,7 +53,7 @@ jobs:
               | grep -m1 -E '^## v[0-9]+\.[0-9]+\.[0-9]+$' \
               | sed 's/^## v//' || true)
             if [[ -z "$v" ]]; then continue; fi
-            if [[ "$prev" != "$VERSION" && "$v" == "$VERSION" ]]; then
+            if [[ "$v" == "$VERSION" ]] && { [[ -z "$prev" ]] || version_lt "$prev" "$VERSION"; }; then
               release_sha=$sha
             fi
             prev=$v
@@ -92,7 +98,9 @@ jobs:
             git archive "$2" | tar -x -C "$b" || return 1
             diff -r --no-dereference "$a" "$b" >/dev/null || return 1
             # diff reads contents only, so the file modes are compared on their own.
-            [[ "$(cd "$a" && find . -printf '%m %p\n' | sort)" == "$(cd "$b" && find . -printf '%m %p\n' | sort)" ]]
+            # NUL-terminated records, since a path may hold a newline.
+            cmp -s <(cd "$a" && find . -printf '%m %p\0' | sort -z) \
+              <(cd "$b" && find . -printf '%m %p\0' | sort -z)
           }
           # A tag an earlier run created stays the target while it ships the same
           # package from a green commit, so a retry after a failed release step
@@ -158,10 +166,13 @@ jobs:
           RELEASE_SHA: ${{ steps.target.outputs.sha }}
         run: |
           set -euo pipefail
+          # awk reads to the end: an early exit would close the pipe on git show,
+          # and pipefail would fail the step on its SIGPIPE.
           git show "$RELEASE_SHA:CHANGELOG.md" | awk -v ver="$VERSION" '
-            BEGIN { capture = 0 }
+            BEGIN { capture = 0; done = 0 }
+            done { next }
             /^## / {
-              if (capture) exit
+              if (capture) { done = 1; next }
               if ($0 == "## v" ver) { capture = 1; next }
             }
             capture { print }
@@ -169,6 +180,10 @@ jobs:
             | awk 'NF { found=1 } found' \
             | awk '{ lines[NR] = $0 } END { last = NR; while (last > 0 && lines[last] == "") last--; for (i = 1; i <= last; i++) print lines[i] }' \
             > release-notes.md
+          if [[ ! -s release-notes.md ]]; then
+            echo "::error file=CHANGELOG.md::CHANGELOG.md at $RELEASE_SHA has no notes under ## v$VERSION. Aborting before the tag and the release."
+            exit 1
+          fi
           echo "::group::release-notes.md"
           cat release-notes.md
           echo "::endgroup::"
@@ -191,16 +206,25 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION: ${{ steps.ver.outputs.version }}
+          RELEASE_SHA: ${{ steps.target.outputs.sha }}
         run: |
           set -euo pipefail
-          if gh release view "v$VERSION" >/dev/null 2>&1; then
+          # A draft is not a published release, so it does not count as done.
+          if is_draft=$(gh release view "v$VERSION" --json isDraft --jq .isDraft 2>/dev/null); then
+            if [[ "$is_draft" == "true" ]]; then
+              echo "::error::A draft release for v$VERSION exists. Publish it or delete it, then rerun."
+              exit 1
+            fi
             echo "Release v$VERSION already exists — no-op"
             exit 0
           fi
           # --verify-tag refuses to create the tag, so a tag deleted after the
           # tag step fails the run instead of being recreated on the default branch.
+          # --target covers a deletion between that check and the request: a
+          # recreated tag lands on RELEASE_SHA, never on the default branch tip.
           gh release create "v$VERSION" \
             --verify-tag \
+            --target "$RELEASE_SHA" \
             --title "v$VERSION" \
             --notes-file release-notes.md
           echo "Published release v$VERSION"

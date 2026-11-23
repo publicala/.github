@@ -12,7 +12,7 @@ Org-wide GitHub configuration for publica.la.
 
 ## Changelog release
 
-The workflow tags the commit that first put the top `## vX.Y.Z` of `CHANGELOG.md` on `main`, then publishes a GitHub Release from that block. The caller's `ci.yml` owns the event routing and the gate, and calls it only after its own `ci-success` passed on `main`. The caller grants `contents: write` and `checks: read`.
+The workflow tags the commit that first put the top `## vX.Y.Z` of `CHANGELOG.md` on `main` (the introduction commit), then publishes a GitHub Release from that block. Only a step up from a lower version introduces a version: a revert of a newer entry brings the version back to the top but keeps its earlier introduction commit. The caller's `ci.yml` owns the event routing and the gate, and calls it only after its own `ci-success` passed on `main`. The caller grants `contents: write` and `checks: read`.
 
 ```text
 Pick the commit to tag
@@ -29,6 +29,8 @@ Pick the commit to tag
 A re-run of a red commit uses that commit's own workflow files, so a failure fixed in a workflow cannot turn it green. The third branch releases the same package from a green commit instead. The package is the commit's `git archive`, which is what Composer installs: every file its `.gitattributes` does not mark `export-ignore`.
 
 A tag already at another commit is left in place, and the run does nothing. Tags are never moved.
+
+The run fails before it tags when the version block at the tagged commit has no notes. It fails before it publishes when a draft release for the version exists: publish or delete the draft, then run it again.
 
 ## Dependabot Critical gate
 
