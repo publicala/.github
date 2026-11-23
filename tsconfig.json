@@ -13,5 +13,5 @@
     "target": "ES2024",
     "types": ["node"]
   },
-  "include": [".github/actions/*/src/**/*.ts", ".github/actions/*/tests/**/*.ts"]
+  "include": [".github/actions/*/src/**/*.ts", ".github/actions/*/tests/**/*.ts", "tests/**/*.ts"]
 }

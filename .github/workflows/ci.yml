@@ -62,6 +62,8 @@ jobs:
             .github/workflows/large-pr-gate.yml \
             .github/actions/shared/src \
             .github/actions/shared/tests \
+            .github/workflows/changelog-release.yml \
+            tests/changelog-release \
             README.md \
             -type f -print0 \
             | xargs -0 grep -aEho '[[:alnum:]_]+' \
@@ -86,13 +88,33 @@ jobs:
         # actionlint 1.7.12 does not know GitHub's $/ self-repository syntax.
         run: ./actionlint -ignore 'specifying action "\$/.*" in invalid format because ref is missing' -color
 
+  changelog-release:
+    name: Test changelog release workflow
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-node@395ad3262231945c25e8478fd5baf05154b1d79f # v6.1.0
+        with:
+          node-version: 24
+          cache: npm
+
+      - run: npm ci
+
+      - name: Run the workflow steps against git fixtures
+        # Under both mawk and gawk, since the runner image decides which one is awk.
+        env:
+          CHANGELOG_RELEASE_REQUIRE_AWKS: '1'
+        run: npm run test:changelog-release
+
   ci-success:
     name: ci-success
     if: always()
-    needs: action
+    needs: [action, changelog-release]
     runs-on: ubuntu-latest
     steps:
       - name: Require every CI job
         env:
           ACTION_RESULT: ${{ needs.action.result }}
-        run: test "$ACTION_RESULT" = success
+          CHANGELOG_RELEASE_RESULT: ${{ needs.changelog-release.result }}
+        run: test "$ACTION_RESULT" = success && test "$CHANGELOG_RELEASE_RESULT" = success
