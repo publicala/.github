@@ -225,15 +225,20 @@ jobs:
           set -euo pipefail
           # awk reads to the end: an early exit would close the pipe on git show,
           # and pipefail would fail the step on its SIGPIPE.
-          # The block ends at the next version heading, the same `## vX.Y.Z` line
-          # the other steps read, so a "## " example in the notes stays in them.
+          # The block always ends at the next version heading, the same
+          # `## vX.Y.Z` line the other steps read. Any other "## " heading, such as
+          # a Versioning footer, ends it too, unless it sits inside a code fence.
+          # The fence check is a plain toggle: a misread can only move the end
+          # within this version's block, never into another version's notes.
           git show "$RELEASE_SHA:CHANGELOG.md" | awk -v ver="$VERSION" '
-            BEGIN { capture = 0; done = 0 }
+            BEGIN { capture = 0; done = 0; fence = 0 }
             done { next }
             /^## v[0-9]+\.[0-9]+\.[0-9]+$/ {
               if (capture) { done = 1; next }
-              if ($0 == "## v" ver) { capture = 1; next }
+              if ($0 == "## v" ver) { capture = 1; fence = 0; next }
             }
+            capture && !fence && /^## / { done = 1; next }
+            /^[ \t]*(```|~~~)/ { fence = !fence }
             capture { print }
           ' \
             | awk 'NF { found=1 } found' \
