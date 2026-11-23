@@ -12,7 +12,7 @@ Org-wide GitHub configuration for publica.la.
 
 ## Changelog release
 
-The workflow tags the commit that first put the top `## vX.Y.Z` of `CHANGELOG.md` on `main` (the introduction commit), then publishes a GitHub Release from that block. A revert of a newer entry brings the version back to the top but keeps its earlier introduction commit. Any other change to the version introduces it, such as a step up or a corrected heading. The caller's `ci.yml` owns the event routing and the gate, and calls it only after its own `ci-success` passed on `main`. The caller grants `contents: write` and `checks: read`.
+The workflow tags the commit that first put the top `## vX.Y.Z` of `CHANGELOG.md` on `main` (the introduction commit), then publishes a GitHub Release from that block. A change to the version from no version or a lower one introduces it, as does its first appearance. When the version comes back to the top after a higher one, history cannot tell a revert from a heading corrected to a version used before: with a tag, the existing tag decides, and without one the run fails and asks for a manual release. The caller's `ci.yml` owns the event routing and the gate, and calls it only after its own `ci-success` passed on `main`. The caller grants `contents: write` and `checks: read`.
 
 ```text
 Pick the commit to tag
@@ -22,6 +22,8 @@ Pick the commit to tag
 │   └── The introduction commit
 ├── The introduction commit and this run's commit have the same git archive
 │   └── This run's commit
+├── v$VERSION exists at a commit the steps above did not pick
+│   └── None: the tag is out-of-band, and the run does nothing
 └── Any other case
     └── Fail
 ```
