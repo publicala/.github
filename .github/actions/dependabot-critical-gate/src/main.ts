@@ -5,12 +5,17 @@ import { debugFailureDetail, GateError, gateFailureMessage } from '../../shared/
 import { requiredInput } from '../../shared/src/inputs.js';
 import { overdueCriticalManifests } from './alerts.js';
 import { decideGate } from './gate.js';
-import { readPullRequestEvidence } from './github.js';
+import { readChangedPaths } from './github.js';
 
 type JsonObject = Record<string, unknown>;
 
-const PASS_MESSAGE = 'This repository has no blocking Dependabot condition.';
-const BLOCK_MESSAGE = 'Repository maintainers must review Dependabot alerts in the Security view.';
+const PASS_MESSAGE = 'This pull request has no blocking Dependabot condition.';
+const BLOCK_MESSAGE = [
+  'A Critical Dependabot alert in this repository is past its deadline.',
+  'A pull request that changes the manifest of that alert passes this gate.',
+  'Every other pull request is blocked until the alert closes.',
+  'Procedure: https://github.com/publicala/.github#pass-the-dependabot-critical-gate',
+].join(' ');
 
 async function run(): Promise<void> {
   try {
@@ -41,7 +46,7 @@ async function run(): Promise<void> {
 
     const event = pullRequestEvent(github.context.payload as JsonObject);
     const repositoryClient = githubClient(repositoryToken);
-    const evidence = await readPullRequestEvidence(
+    const changedPaths = await readChangedPaths(
       repositoryClient,
       owner,
       repo,
@@ -49,7 +54,7 @@ async function run(): Promise<void> {
       event.headSha,
     );
 
-    if (decideGate(manifests, evidence) === 'pass') {
+    if (decideGate(manifests, changedPaths) === 'pass') {
       await report(PASS_MESSAGE);
       return;
     }
