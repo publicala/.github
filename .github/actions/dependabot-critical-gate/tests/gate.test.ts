@@ -3,27 +3,22 @@ import test from 'node:test';
 import { decideGate } from '../src/gate.js';
 
 test('passes when no Critical alert is overdue', () => {
-  assert.equal(decideGate(new Set()), 'pass');
+  assert.equal(decideGate(new Set(), new Set(['src/app.ts'])), 'pass');
 });
 
-test('blocks a normal pull request when a Critical alert is overdue', () => {
-  assert.equal(decideGate(new Set(['package-lock.json'])), 'block');
-  assert.equal(decideGate(new Set(['package-lock.json']), {
-    isVerifiedDependabot: false,
-    changedPaths: new Set(['package-lock.json']),
-  }), 'block');
+test('passes a pull request that changes the manifest of an overdue Critical alert', () => {
+  assert.equal(
+    decideGate(new Set(['composer.lock', 'package-lock.json']), new Set(['package.json', 'package-lock.json'])),
+    'pass',
+  );
 });
 
-test('passes a verified Dependabot pull request for an affected manifest', () => {
-  assert.equal(decideGate(new Set(['composer.lock', 'package-lock.json']), {
-    isVerifiedDependabot: true,
-    changedPaths: new Set(['package.json', 'package-lock.json']),
-  }), 'pass');
+test('blocks a pull request that changes no manifest of an overdue Critical alert', () => {
+  assert.equal(decideGate(new Set(['composer.lock']), new Set()), 'block');
+  assert.equal(decideGate(new Set(['composer.lock']), new Set(['package.json', 'package-lock.json'])), 'block');
 });
 
-test('blocks a verified Dependabot pull request for another manifest', () => {
-  assert.equal(decideGate(new Set(['composer.lock']), {
-    isVerifiedDependabot: true,
-    changedPaths: new Set(['package.json', 'package-lock.json']),
-  }), 'block');
+test('matches the whole manifest path', () => {
+  assert.equal(decideGate(new Set(['composer.lock']), new Set(['packages/api/composer.lock'])), 'block');
+  assert.equal(decideGate(new Set(['packages/api/composer.lock']), new Set(['composer.lock'])), 'block');
 });

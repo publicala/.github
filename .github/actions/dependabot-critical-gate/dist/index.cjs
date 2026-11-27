@@ -24605,47 +24605,20 @@ function requiredString(value, field) {
 }
 
 // .github/actions/dependabot-critical-gate/src/gate.ts
-function decideGate(overdueCriticalManifests2, evidence) {
+function decideGate(overdueCriticalManifests2, changedPaths) {
   if (overdueCriticalManifests2.size === 0) {
     return "pass";
   }
-  if (evidence?.isVerifiedDependabot !== true) {
-    return "block";
-  }
-  return [...evidence.changedPaths].some((path) => overdueCriticalManifests2.has(path)) ? "pass" : "block";
+  return [...changedPaths].some((path) => overdueCriticalManifests2.has(path)) ? "pass" : "block";
 }
 
 // .github/actions/dependabot-critical-gate/src/github.ts
-var DEPENDABOT_ID = 49699333;
-var DEPENDABOT_LOGIN = "dependabot[bot]";
-var WEB_FLOW_ID = 19864447;
-var WEB_FLOW_LOGIN = "web-flow";
-var MAX_COMMITS = 250;
 var MAX_CHANGED_FILES = 3e3;
-async function readPullRequestEvidence(octokit, owner, repo, pullNumber, expectedHeadSha) {
+async function readChangedPaths(octokit, owner, repo, pullNumber, expectedHeadSha) {
   const response = await octokit.rest.pulls.get({ owner, repo, pull_number: pullNumber });
   const pull = response.data;
   if (pull.head.sha !== expectedHeadSha) {
     throw new GateError("The pull request head changed during evaluation.");
-  }
-  if (!isDependabotPullRequest(pull, owner, repo)) {
-    return ineligibleEvidence();
-  }
-  const commitCount = positiveInteger(pull.commits, "commit count");
-  if (commitCount > MAX_COMMITS) {
-    throw new GateError("The pull request commit list exceeds the GitHub API limit.");
-  }
-  const commits = await octokit.paginate(octokit.rest.pulls.listCommits, {
-    owner,
-    repo,
-    pull_number: pullNumber,
-    per_page: 100
-  });
-  if (commits.length !== commitCount) {
-    throw new GateError("The pull request commit list is incomplete.");
-  }
-  if (!commits.every(isVerifiedDependabotCommit)) {
-    return ineligibleEvidence();
   }
   const changedFileCount = nonNegativeInteger(pull.changed_files, "changed file count");
   if (changedFileCount > MAX_CHANGED_FILES) {
@@ -24660,25 +24633,7 @@ async function readPullRequestEvidence(octokit, owner, repo, pullNumber, expecte
   if (files.length !== changedFileCount) {
     throw new GateError("The pull request file list is incomplete.");
   }
-  return {
-    isVerifiedDependabot: true,
-    changedPaths: new Set(files.map((file) => file.filename))
-  };
-}
-function isDependabotPullRequest(pull, owner, repo) {
-  return pull.user?.id === DEPENDABOT_ID && pull.user.login === DEPENDABOT_LOGIN && pull.user.type === "Bot" && pull.head.repo?.full_name.toLowerCase() === `${owner}/${repo}`.toLowerCase();
-}
-function isVerifiedDependabotCommit(commit) {
-  return commit.author?.id === DEPENDABOT_ID && commit.author.login === DEPENDABOT_LOGIN && commit.committer?.id === WEB_FLOW_ID && commit.committer.login === WEB_FLOW_LOGIN && commit.commit.verification?.verified === true && commit.commit.verification.reason === "valid";
-}
-function ineligibleEvidence() {
-  return { isVerifiedDependabot: false, changedPaths: /* @__PURE__ */ new Set() };
-}
-function positiveInteger(value, field) {
-  if (!Number.isSafeInteger(value) || Number(value) <= 0) {
-    throw new GateError(`The pull request ${field} is invalid.`);
-  }
-  return Number(value);
+  return new Set(files.map((file) => file.filename));
 }
 function nonNegativeInteger(value, field) {
   if (!Number.isSafeInteger(value) || Number(value) < 0) {
@@ -24688,8 +24643,13 @@ function nonNegativeInteger(value, field) {
 }
 
 // .github/actions/dependabot-critical-gate/src/main.ts
-var PASS_MESSAGE = "This repository has no blocking Dependabot condition.";
-var BLOCK_MESSAGE = "Repository maintainers must review Dependabot alerts in the Security view.";
+var PASS_MESSAGE = "This pull request has no blocking Dependabot condition.";
+var BLOCK_MESSAGE = [
+  "A Critical Dependabot alert in this repository is past its deadline.",
+  "A pull request that changes the manifest of that alert passes this gate.",
+  "Every other pull request is blocked until the alert closes.",
+  "Procedure: https://github.com/publicala/.github#pass-the-dependabot-critical-gate"
+].join(" ");
 async function run() {
   try {
     if (context2.eventName !== "pull_request_target") {
@@ -24697,7 +24657,7 @@ async function run() {
     }
     const alertsToken = requiredInput("alerts-token");
     const repositoryToken = requiredInput("repository-token");
-    const slaHours = positiveInteger2(requiredInput("sla-hours"));
+    const slaHours = positiveInteger(requiredInput("sla-hours"));
     setSecret(alertsToken);
     setSecret(repositoryToken);
     const { owner, repo } = context2.repo;
@@ -24715,14 +24675,14 @@ async function run() {
     }
     const event = pullRequestEvent(context2.payload);
     const repositoryClient = githubClient(repositoryToken);
-    const evidence = await readPullRequestEvidence(
+    const changedPaths = await readChangedPaths(
       repositoryClient,
       owner,
       repo,
       event.number,
       event.headSha
     );
-    if (decideGate(manifests, evidence) === "pass") {
+    if (decideGate(manifests, changedPaths) === "pass") {
       await report(PASS_MESSAGE);
       return;
     }
@@ -24747,7 +24707,7 @@ function pullRequestEvent(payload) {
   const pull = object2(payload.pull_request);
   const head = object2(pull.head);
   return {
-    number: positiveInteger2(payload.number),
+    number: positiveInteger(payload.number),
     headSha: requiredString2(head.sha)
   };
 }
@@ -24763,7 +24723,7 @@ function requiredString2(value) {
   }
   return value;
 }
-function positiveInteger2(value) {
+function positiveInteger(value) {
   const number = typeof value === "string" && /^\d+$/.test(value) ? Number(value) : value;
   if (!Number.isSafeInteger(number) || Number(number) <= 0) {
     throw new GateError("The gate has an invalid positive integer.");

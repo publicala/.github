@@ -5,7 +5,7 @@ Org-wide GitHub configuration for publica.la.
 ## What lives here
 
 - **`.github/workflows/secret-scan.yml`**: the centralized gitleaks secret-leak scan. An organization repository ruleset ("Require workflows to pass before merging") points at this workflow and enforces it on every repository's pull requests, so no per-repo workflow file is needed. Detection rules and tuning happen here, once, for the whole fleet.
-- **`.github/workflows/dependabot-critical-gate.yml`**: the organization-wide Critical Dependabot alert gate. It blocks merges after the seven-day SLA and lets verified Dependabot repairs proceed.
+- **`.github/workflows/dependabot-critical-gate.yml`**: the organization-wide Critical Dependabot alert gate. It blocks merges after the seven-day SLA, except pull requests that change the manifest of an overdue alert.
 - **`.github/workflows/large-pr-gate.yml`**: the organization-wide large pull request gate. It blocks a merge above 20,000 reviewable changed lines until a human other than the author approves it.
 - **`.github/workflows/changelog-release.yml`**: the release cut of the public PHP packages whose `CHANGELOG.md` drives their releases. A package's `ci.yml` calls it from its `release` job, pinned by commit SHA. See [Changelog release](#changelog-release).
 - **`PULL_REQUEST_TEMPLATE.md`**: the org-wide default pull request template. GitHub serves it in the web compose form of every publicala repository that carries no template of its own, including repositories that do not exist yet. It is a copy: the canonical body lives at [`pla-stack/references/pull_request_template.md`](https://github.com/publicala/pla-stack/blob/main/references/pull_request_template.md), and the `pull-request-template-audit` routine keeps this copy and every per-repo copy in sync with it. Edit the canonical, not this file.
@@ -46,17 +46,28 @@ The organization ruleset calls this workflow for `pull_request_target`, since th
 Pull request starts
 ├── No Critical alert is at least 168 hours old
 │   └── Pass
-├── Verified Dependabot pull request changes an affected manifest
+├── Pull request changes the manifest of an overdue Critical alert
 │   └── Pass
 └── Any other pull request
     └── Fail
 ```
 
-The repair exception requires the Dependabot bot identity on the pull request and every commit, GitHub's verified `web-flow` signature on every commit, a branch in the target repository, and a changed file that matches an overdue alert's manifest.
+The repair path is the same for every author: Dependabot, a person, or an agent. A changed file path must equal the manifest path of an overdue alert, such as `composer.lock` or `packages/api/package-lock.json`.
+
+The gate compares paths. It cannot confirm that the change repairs the alert, so a pull request that changes the manifest for another reason also passes. An alert that stays open after the merge keeps blocking every other pull request.
 
 The action reads GitHub API responses only. It does not read file contents, install dependencies, or execute pull request code. Incomplete Critical alert data and incomplete pull request data fail closed.
 
 The action reports only a generic pass or block message, or an error reason (see [Gate errors](#gate-errors)). Alert identifiers, packages, manifests, versions, and dispositions do not enter public workflow logs.
+
+### Pass the Dependabot Critical gate
+
+A blocked pull request means the repository has a Critical Dependabot alert older than seven days, and the pull request does not change that alert's manifest.
+
+1. Open the repository's Security view and find the Critical alert. It names the package, the manifest, and the fixed release.
+2. Merge the repair. Dependabot's pull request for the alert passes the gate, and so does your own pull request that updates the package in that manifest. You can push to Dependabot's branch when its pull request needs a code change.
+3. When the alert does not apply to the repository, dismiss it with the reason that fits. A dismissed alert does not block.
+4. Re-run `Critical alert SLA gate` from the Checks tab of each blocked pull request, or push a commit to it.
 
 ## Large PR gate
 

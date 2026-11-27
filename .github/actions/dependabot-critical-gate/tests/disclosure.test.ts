@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import { MARKER, runBundle, type FakeGitHub } from '../../shared/tests/bundle-run.js';
 
@@ -42,6 +43,35 @@ test('names a failed pull request read without the overdue alert details', async
   assertNoMarker(result);
 });
 
+test('passes a human pull request that changes the overdue manifest', async () => {
+  const result = await runBundle(BUNDLE, INPUTS, repositoryWithOverdueAlert([`${MARKER}/package.json`, 'src/app.ts']));
+
+  assert.equal(result.status, 0);
+  assert.match(result.output, /This pull request has no blocking Dependabot condition\./);
+  assert.match(result.summary, /This pull request has no blocking Dependabot condition\./);
+  assertNoMarker(result);
+});
+
+test('tells a blocked pull request how to pass without the overdue alert details', async () => {
+  const result = await runBundle(BUNDLE, INPUTS, repositoryWithOverdueAlert(['src/app.ts']));
+
+  assert.equal(result.status, 1);
+  assert.match(
+    result.output,
+    /::error::A Critical Dependabot alert in this repository is past its deadline\. A pull request that changes the manifest of that alert passes this gate\./,
+  );
+  assert.match(result.summary, /A pull request that changes the manifest of that alert passes this gate\./);
+  assertNoMarker(result);
+});
+
+test('links a blocked pull request to a heading of the README', async () => {
+  const result = await runBundle(BUNDLE, INPUTS, repositoryWithOverdueAlert(['src/app.ts']));
+  const fragment = /Procedure: https:\/\/github\.com\/publicala\/\.github#([a-z-]+)/.exec(result.output)?.[1];
+  const readme = await readFile('README.md', 'utf8');
+
+  assert.ok(fragment !== undefined && headingFragments(readme).includes(fragment));
+});
+
 test('reports a request that never reached GitHub', async () => {
   const result = await runBundle(BUNDLE, INPUTS, 'unreachable');
 
@@ -61,6 +91,33 @@ function overdueAlert(dependency: Record<string, unknown> = {}) {
     security_vulnerability: { package: { name: MARKER }, vulnerable_version_range: MARKER },
     dependency: { manifest_path: `${MARKER}/package.json`, package: { ecosystem: 'npm', name: MARKER }, ...dependency },
   };
+}
+
+function repositoryWithOverdueAlert(changedPaths: string[]): FakeGitHub {
+  return (request) => {
+    const path = request.url?.split('?')[0];
+
+    if (path === '/repos/acme/example/dependabot/alerts') {
+      return { status: 200, body: [overdueAlert()] };
+    }
+
+    if (path === '/repos/acme/example/pulls/42') {
+      return {
+        status: 200,
+        body: { user: { login: 'octocat', type: 'User' }, head: { sha: 'head-sha' }, changed_files: changedPaths.length },
+      };
+    }
+
+    return { status: 200, body: changedPaths.map((filename) => ({ filename })) };
+  };
+}
+
+// The fragments GitHub gives the headings of a rendered Markdown file.
+function headingFragments(markdown: string): string[] {
+  return markdown
+    .split('\n')
+    .filter((line) => /^#+ /.test(line))
+    .map((line) => line.replace(/^#+ /, '').toLowerCase().replace(/[^a-z0-9 -]/g, '').replaceAll(' ', '-'));
 }
 
 function assertNoMarker(result: { output: string; summary: string }) {
