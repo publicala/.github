@@ -12,8 +12,8 @@ export async function readChangedPaths(
   pullNumber: number,
   expectedHeadSha: string,
 ): Promise<Set<string>> {
-  const response = await octokit.rest.pulls.get({ owner, repo, pull_number: pullNumber });
-  const pull = response.data;
+  const readPull = async () => (await octokit.rest.pulls.get({ owner, repo, pull_number: pullNumber })).data;
+  const pull = await readPull();
 
   if (pull.head.sha !== expectedHeadSha) {
     throw new GateError('The pull request head changed during evaluation.');
@@ -35,7 +35,20 @@ export async function readChangedPaths(
     throw new GateError('The pull request file list is incomplete.');
   }
 
-  return new Set(files.map((file) => file.filename));
+  // A push or a retarget between the two reads leaves a file list of another diff.
+  const pullAfterFiles = await readPull();
+  if (
+    pullAfterFiles.head.sha !== expectedHeadSha
+    || pullAfterFiles.base.ref !== pull.base.ref
+    || pullAfterFiles.changed_files !== changedFileCount
+  ) {
+    throw new GateError('The pull request changed during evaluation.');
+  }
+
+  // A renamed manifest counts under the path the alert still names.
+  return new Set(files.flatMap((file) => (
+    file.previous_filename === undefined ? [file.filename] : [file.filename, file.previous_filename]
+  )));
 }
 
 function nonNegativeInteger(value: unknown, field: string): number {

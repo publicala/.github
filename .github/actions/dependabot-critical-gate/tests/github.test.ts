@@ -17,6 +17,38 @@ test('returns no path for a pull request without changed files', async () => {
   assert.deepEqual(changedPaths, new Set());
 });
 
+test('returns the previous path of a renamed file', async () => {
+  const files = [
+    { filename: '.github/workflows/build.yml', previous_filename: '.github/workflows/ci.yml' },
+    { filename: 'package-lock.json' },
+  ];
+
+  const changedPaths = await readChangedPaths(client({ files }), 'acme', 'example', 42, 'head-sha');
+
+  assert.deepEqual(
+    changedPaths,
+    new Set(['.github/workflows/build.yml', '.github/workflows/ci.yml', 'package-lock.json']),
+  );
+});
+
+test('fails closed when the pull request changes while its files are read', async () => {
+  const cases = [
+    (pull: ReturnType<typeof validPull>) => { pull.head.sha = 'next-head'; },
+    (pull: ReturnType<typeof validPull>) => { pull.base.ref = 'release'; },
+    (pull: ReturnType<typeof validPull>) => { pull.changed_files = 3; },
+  ];
+
+  for (const mutate of cases) {
+    const pullAfterFiles = validPull();
+    mutate(pullAfterFiles);
+
+    await assert.rejects(
+      () => readChangedPaths(client({ pullAfterFiles }), 'acme', 'example', 42, 'head-sha'),
+      /pull request changed during evaluation/,
+    );
+  }
+});
+
 test('fails closed when the event head is stale', async () => {
   await assert.rejects(
     () => readChangedPaths(client(), 'acme', 'example', 42, 'old-head'),
@@ -64,16 +96,20 @@ test('propagates GitHub API failures', async () => {
 function validPull() {
   return {
     head: { sha: 'head-sha' },
+    base: { ref: 'main' },
     changed_files: 2,
   };
 }
 
 function client(options: {
   pull?: ReturnType<typeof validPull>;
-  files?: { filename: string }[];
+  pullAfterFiles?: ReturnType<typeof validPull>;
+  files?: { filename: string; previous_filename?: string }[];
   getError?: Error;
 } = {}) {
   const files = options.files ?? [{ filename: 'package.json' }, { filename: 'package-lock.json' }];
+  const pull = options.pull ?? validPull();
+  const reads = [pull, options.pullAfterFiles ?? pull];
 
   return {
     rest: {
@@ -83,7 +119,7 @@ function client(options: {
             throw options.getError;
           }
 
-          return { data: options.pull ?? validPull() };
+          return { data: reads.shift() ?? pull };
         },
         listFiles: () => undefined,
       },

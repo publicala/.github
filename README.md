@@ -54,7 +54,11 @@ Pull request starts
 
 The repair path is the same for every author: Dependabot, a person, or an agent. A changed file path must equal the manifest path of an overdue alert, such as `composer.lock` or `packages/api/package-lock.json`.
 
-The gate compares paths. It cannot confirm that the change repairs the alert, so a pull request that changes the manifest for another reason also passes. An alert that stays open after the merge keeps blocking every other pull request.
+The gate compares paths. It cannot confirm that the change repairs the alert, so a pull request that changes the manifest for another reason also passes, and so does one that renames or deletes it. An alert that stays open after the merge keeps blocking every other pull request.
+
+A repair that cannot change the file the alert names does not pass, for example a fix in a parent manifest or a version catalog. Dismiss the alert with `fix_started` to merge that repair.
+
+In a public repository, the result of a pull request shows whether one of its files is the manifest of an overdue alert. The manifest and the advisory are public there, so the gate accepts this.
 
 The action reads GitHub API responses only. It does not read file contents, install dependencies, or execute pull request code. Incomplete Critical alert data and incomplete pull request data fail closed.
 

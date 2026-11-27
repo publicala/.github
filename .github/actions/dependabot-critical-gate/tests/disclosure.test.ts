@@ -66,10 +66,11 @@ test('tells a blocked pull request how to pass without the overdue alert details
 
 test('links a blocked pull request to a heading of the README', async () => {
   const result = await runBundle(BUNDLE, INPUTS, repositoryWithOverdueAlert(['src/app.ts']));
-  const fragment = /Procedure: https:\/\/github\.com\/publicala\/\.github#([a-z-]+)/.exec(result.output)?.[1];
+  const link = /Procedure: (\S+)/.exec(result.output)?.[1] ?? '';
   const readme = await readFile('README.md', 'utf8');
 
-  assert.ok(fragment !== undefined && headingFragments(readme).includes(fragment));
+  assert.match(link, /^https:\/\/github\.com\/publicala\/\.github#/);
+  assert.ok(headingFragments(readme).includes(new URL(link).hash.slice(1)));
 });
 
 test('reports a request that never reached GitHub', async () => {
@@ -104,7 +105,12 @@ function repositoryWithOverdueAlert(changedPaths: string[]): FakeGitHub {
     if (path === '/repos/acme/example/pulls/42') {
       return {
         status: 200,
-        body: { user: { login: 'octocat', type: 'User' }, head: { sha: 'head-sha' }, changed_files: changedPaths.length },
+        body: {
+          user: { login: 'octocat', type: 'User' },
+          head: { sha: 'head-sha' },
+          base: { ref: 'main' },
+          changed_files: changedPaths.length,
+        },
       };
     }
 
@@ -114,9 +120,17 @@ function repositoryWithOverdueAlert(changedPaths: string[]): FakeGitHub {
 
 // The fragments GitHub gives the headings of a rendered Markdown file.
 function headingFragments(markdown: string): string[] {
+  let insideCodeFence = false;
+
   return markdown
     .split('\n')
-    .filter((line) => /^#+ /.test(line))
+    .filter((line) => {
+      if (line.startsWith('```')) {
+        insideCodeFence = !insideCodeFence;
+      }
+
+      return !insideCodeFence && /^#+ /.test(line);
+    })
     .map((line) => line.replace(/^#+ /, '').toLowerCase().replace(/[^a-z0-9 -]/g, '').replaceAll(' ', '-'));
 }
 

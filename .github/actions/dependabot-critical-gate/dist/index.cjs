@@ -24615,8 +24615,8 @@ function decideGate(overdueCriticalManifests2, changedPaths) {
 // .github/actions/dependabot-critical-gate/src/github.ts
 var MAX_CHANGED_FILES = 3e3;
 async function readChangedPaths(octokit, owner, repo, pullNumber, expectedHeadSha) {
-  const response = await octokit.rest.pulls.get({ owner, repo, pull_number: pullNumber });
-  const pull = response.data;
+  const readPull = async () => (await octokit.rest.pulls.get({ owner, repo, pull_number: pullNumber })).data;
+  const pull = await readPull();
   if (pull.head.sha !== expectedHeadSha) {
     throw new GateError("The pull request head changed during evaluation.");
   }
@@ -24633,7 +24633,11 @@ async function readChangedPaths(octokit, owner, repo, pullNumber, expectedHeadSh
   if (files.length !== changedFileCount) {
     throw new GateError("The pull request file list is incomplete.");
   }
-  return new Set(files.map((file) => file.filename));
+  const pullAfterFiles = await readPull();
+  if (pullAfterFiles.head.sha !== expectedHeadSha || pullAfterFiles.base.ref !== pull.base.ref || pullAfterFiles.changed_files !== changedFileCount) {
+    throw new GateError("The pull request changed during evaluation.");
+  }
+  return new Set(files.flatMap((file) => file.previous_filename === void 0 ? [file.filename] : [file.filename, file.previous_filename]));
 }
 function nonNegativeInteger(value, field) {
   if (!Number.isSafeInteger(value) || Number(value) < 0) {
