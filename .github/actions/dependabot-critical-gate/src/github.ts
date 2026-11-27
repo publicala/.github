@@ -11,12 +11,18 @@ export async function readChangedPaths(
   repo: string,
   pullNumber: number,
   expectedHeadSha: string,
+  expectedBaseRef: string,
 ): Promise<Set<string>> {
   const readPull = async () => (await octokit.rest.pulls.get({ owner, repo, pull_number: pullNumber })).data;
   const pull = await readPull();
 
   if (pull.head.sha !== expectedHeadSha) {
     throw new GateError('The pull request head changed during evaluation.');
+  }
+
+  // A re-run of an event from before a retarget still carries the old base branch.
+  if (pull.base.ref !== expectedBaseRef) {
+    throw new GateError('The pull request base branch changed after this event.');
   }
 
   const changedFileCount = nonNegativeInteger(pull.changed_files, 'changed file count');
@@ -39,7 +45,7 @@ export async function readChangedPaths(
   const pullAfterFiles = await readPull();
   if (
     pullAfterFiles.head.sha !== expectedHeadSha
-    || pullAfterFiles.base.ref !== pull.base.ref
+    || pullAfterFiles.base.ref !== expectedBaseRef
     || pullAfterFiles.changed_files !== changedFileCount
   ) {
     throw new GateError('The pull request changed during evaluation.');
@@ -47,7 +53,9 @@ export async function readChangedPaths(
 
   // A renamed manifest counts under the path the alert still names.
   return new Set(files.flatMap((file) => (
-    file.previous_filename === undefined ? [file.filename] : [file.filename, file.previous_filename]
+    file.status === 'renamed' && file.previous_filename !== undefined
+      ? [file.filename, file.previous_filename]
+      : [file.filename]
   )));
 }
 

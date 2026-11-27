@@ -125,7 +125,7 @@ function headingFragments(markdown: string): string[] {
   return markdown
     .split('\n')
     .filter((line) => {
-      if (line.startsWith('```')) {
+      if (/^(```|~~~)/.test(line)) {
         insideCodeFence = !insideCodeFence;
       }
 
