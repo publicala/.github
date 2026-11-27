@@ -52,6 +52,7 @@ async function run(): Promise<void> {
       repo,
       event.number,
       event.headSha,
+      event.baseRef,
     );
 
     if (decideGate(manifests, changedPaths) === 'pass') {
@@ -81,13 +82,15 @@ async function writeSummary(message: string): Promise<void> {
     .write();
 }
 
-function pullRequestEvent(payload: JsonObject): { number: number; headSha: string } {
+function pullRequestEvent(payload: JsonObject): { number: number; headSha: string; baseRef: string } {
   const pull = object(payload.pull_request);
   const head = object(pull.head);
+  const base = object(pull.base);
 
   return {
     number: positiveInteger(payload.number),
     headSha: requiredString(head.sha),
+    baseRef: requiredString(base.ref),
   };
 }
 

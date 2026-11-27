@@ -24614,11 +24614,14 @@ function decideGate(overdueCriticalManifests2, changedPaths) {
 
 // .github/actions/dependabot-critical-gate/src/github.ts
 var MAX_CHANGED_FILES = 3e3;
-async function readChangedPaths(octokit, owner, repo, pullNumber, expectedHeadSha) {
-  const response = await octokit.rest.pulls.get({ owner, repo, pull_number: pullNumber });
-  const pull = response.data;
+async function readChangedPaths(octokit, owner, repo, pullNumber, expectedHeadSha, expectedBaseRef) {
+  const readPull = async () => (await octokit.rest.pulls.get({ owner, repo, pull_number: pullNumber })).data;
+  const pull = await readPull();
   if (pull.head.sha !== expectedHeadSha) {
     throw new GateError("The pull request head changed during evaluation.");
+  }
+  if (pull.base.ref !== expectedBaseRef) {
+    throw new GateError("The pull request base branch changed after this event.");
   }
   const changedFileCount = nonNegativeInteger(pull.changed_files, "changed file count");
   if (changedFileCount > MAX_CHANGED_FILES) {
@@ -24633,7 +24636,11 @@ async function readChangedPaths(octokit, owner, repo, pullNumber, expectedHeadSh
   if (files.length !== changedFileCount) {
     throw new GateError("The pull request file list is incomplete.");
   }
-  return new Set(files.map((file) => file.filename));
+  const pullAfterFiles = await readPull();
+  if (pullAfterFiles.head.sha !== expectedHeadSha || pullAfterFiles.base.ref !== expectedBaseRef || pullAfterFiles.base.sha !== pull.base.sha || pullAfterFiles.changed_files !== changedFileCount) {
+    throw new GateError("The pull request changed during evaluation.");
+  }
+  return new Set(files.flatMap((file) => file.status === "renamed" && file.previous_filename !== void 0 ? [file.filename, file.previous_filename] : [file.filename]));
 }
 function nonNegativeInteger(value, field) {
   if (!Number.isSafeInteger(value) || Number(value) < 0) {
@@ -24680,7 +24687,8 @@ async function run() {
       owner,
       repo,
       event.number,
-      event.headSha
+      event.headSha,
+      event.baseRef
     );
     if (decideGate(manifests, changedPaths) === "pass") {
       await report(PASS_MESSAGE);
@@ -24706,9 +24714,11 @@ async function writeSummary(message) {
 function pullRequestEvent(payload) {
   const pull = object2(payload.pull_request);
   const head = object2(pull.head);
+  const base = object2(pull.base);
   return {
     number: positiveInteger(payload.number),
-    headSha: requiredString2(head.sha)
+    headSha: requiredString2(head.sha),
+    baseRef: requiredString2(base.ref)
   };
 }
 function object2(value) {

@@ -41,7 +41,7 @@ export async function runBundle(
   const directory = await mkdtemp(join(tmpdir(), 'gate-bundle-'));
   const eventPath = join(directory, 'event.json');
   const summaryPath = join(directory, 'summary.md');
-  await writeFile(eventPath, JSON.stringify({ number: 42, pull_request: { number: 42, head: { sha: 'head-sha' } } }));
+  await writeFile(eventPath, JSON.stringify({ number: 42, pull_request: { number: 42, head: { sha: 'head-sha' }, base: { ref: 'main' } } }));
   await writeFile(summaryPath, '');
 
   const server = github === 'unreachable' ? undefined : await listen(github);
