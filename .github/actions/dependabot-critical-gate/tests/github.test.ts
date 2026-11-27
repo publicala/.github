@@ -42,6 +42,7 @@ test('fails closed when the pull request changes while its files are read', asyn
   const cases = [
     (pull: ReturnType<typeof validPull>) => { pull.head.sha = 'next-head'; },
     (pull: ReturnType<typeof validPull>) => { pull.base.ref = 'release'; },
+    (pull: ReturnType<typeof validPull>) => { pull.base.sha = 'next-base'; },
     (pull: ReturnType<typeof validPull>) => { pull.changed_files = 3; },
   ];
 
@@ -103,7 +104,7 @@ test('propagates GitHub API failures', async () => {
 function validPull() {
   return {
     head: { sha: 'head-sha' },
-    base: { ref: 'main' },
+    base: { ref: 'main', sha: 'base-sha' },
     changed_files: 2,
   };
 }

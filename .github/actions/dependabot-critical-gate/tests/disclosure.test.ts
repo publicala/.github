@@ -108,7 +108,7 @@ function repositoryWithOverdueAlert(changedPaths: string[]): FakeGitHub {
         body: {
           user: { login: 'octocat', type: 'User' },
           head: { sha: 'head-sha' },
-          base: { ref: 'main' },
+          base: { ref: 'main', sha: 'base-sha' },
           changed_files: changedPaths.length,
         },
       };

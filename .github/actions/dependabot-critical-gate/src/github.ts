@@ -46,6 +46,7 @@ export async function readChangedPaths(
   if (
     pullAfterFiles.head.sha !== expectedHeadSha
     || pullAfterFiles.base.ref !== expectedBaseRef
+    || pullAfterFiles.base.sha !== pull.base.sha
     || pullAfterFiles.changed_files !== changedFileCount
   ) {
     throw new GateError('The pull request changed during evaluation.');

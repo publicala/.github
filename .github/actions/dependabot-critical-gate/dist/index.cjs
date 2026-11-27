@@ -24637,7 +24637,7 @@ async function readChangedPaths(octokit, owner, repo, pullNumber, expectedHeadSh
     throw new GateError("The pull request file list is incomplete.");
   }
   const pullAfterFiles = await readPull();
-  if (pullAfterFiles.head.sha !== expectedHeadSha || pullAfterFiles.base.ref !== expectedBaseRef || pullAfterFiles.changed_files !== changedFileCount) {
+  if (pullAfterFiles.head.sha !== expectedHeadSha || pullAfterFiles.base.ref !== expectedBaseRef || pullAfterFiles.base.sha !== pull.base.sha || pullAfterFiles.changed_files !== changedFileCount) {
     throw new GateError("The pull request changed during evaluation.");
   }
   return new Set(files.flatMap((file) => file.status === "renamed" && file.previous_filename !== void 0 ? [file.filename, file.previous_filename] : [file.filename]));
